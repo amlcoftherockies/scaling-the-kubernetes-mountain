@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-gvisor
+spec:
+  # Instructs the CRI to run this Pod's containers inside the gVisor sandbox
+  runtimeClassName: gvisor
+  containers:
+  - name: nginx
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 80

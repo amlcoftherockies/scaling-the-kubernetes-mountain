@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ckad-app-tag
+spec:
+  containers:
+  - name: ckad-app
+    # Replace 'YOUR_DOCKER_USER' or 'YOUR_GCP_PROJECT' with your actual registry path
+    image: YOUR_DOCKER_USER/ckad-app:1.0
+    ports:
+    - containerPort: 8080
