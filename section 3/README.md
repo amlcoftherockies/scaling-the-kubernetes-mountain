@@ -179,6 +179,41 @@ gcloud container clusters get-credentials ckad-cluster --zone us-central1-a --pr
 3.  Inserts a new configuration block (context) into your local `~/.kube/config` file.
 4.  Sets your local terminal's default Kubernetes context to the newly created GKE cluster.
 
+### 4.2 Understanding your Kubeconfig File
+
+Now that your credentials are downloaded, it is important to understand how Kubernetes knows where to send your commands. The configuration file is stored at `~/.kube/config` (or `C:\Users\<username>\.kube\config` on Windows).
+
+If you open the file (or run `kubectl config view`), you will see a YAML document with three primary blocks:
+
+1.  **`clusters`**: A list of all the Kubernetes API Servers you can connect to. Each entry contains:
+    *   `server`: The public or private URL/IP of the control plane (e.g., `https://34.135.48.10`).
+    *   `certificate-authority-data`: Cryptographic keys used to verify that the server is authentic.
+2.  **`users`**: A list of credentials used to authenticate you to the clusters. For GKE, this usually points to the local `gcloud` helper script that dynamically requests OAuth access tokens.
+3.  **`contexts`**: A list of connections linking a **User** to a **Cluster**. For example:
+    *   "Use credentials for `gke-user` to connect to `ckad-cluster`."
+    *   A context can also define a `namespace` so that `kubectl` commands default to that namespace automatically.
+4.  **`current-context`**: A single string indicating which context is active right now. When you run `kubectl get pods`, the CLI reads `current-context` to determine which cluster and credentials to use.
+
+#### Useful `kubectl` Config Commands (Essential for CKAD):
+Since the CKAD exam uses multiple clusters, you must know how to view and navigate contexts:
+
+```bash
+# View your sanitized kubeconfig (hides certificates for readability)
+kubectl config view
+
+# List all available contexts in your config
+kubectl config get-contexts
+
+# Show the active context name
+kubectl config current-context
+
+# Switch to a different context (very common during the exam!)
+kubectl config use-context <context-name>
+
+# Change the default namespace for your current context (saves typing -n <namespace>)
+kubectl config set-context --current --namespace=<namespace-name>
+```
+
 ---
 
 ## 🔍 Step 5: Verify Cluster Connectivity

@@ -120,11 +120,104 @@ At the cluster layer, Kubernetes provides **Namespaces** to logically partition 
     ```bash
     kubectl get pods
     ```
+    kubectl get pods -n practice-ns
+    ```
     *(The pod will not appear, because you are currently looking at the `default` namespace).*
 4.  Query the namespace explicitly:
     ```bash
     kubectl get pods -n practice-ns
     ```
+
+---
+
+### 1.4 Working with Labels (Imperative vs. Declarative)
+
+**Labels** are key-value pairs attached to Kubernetes objects (like Pods). They do not provide direct function to the container, but are used to organize resources and select subsets of objects.
+
+#### 1.4.1 The Imperative Way
+You can add, update, and remove labels on running Pods directly using the `kubectl label` command:
+
+```bash
+# Add a label 'env=prod' to a pod
+kubectl label pod nginx-single env=prod
+
+# View all labels on your pods
+kubectl get pods --show-labels
+
+# Query/filter pods using a label selector (-l)
+kubectl get pods -l env=prod
+
+# Update/overwrite an existing label (requires --overwrite flag)
+kubectl label pod nginx-single env=dev --overwrite
+
+# Verify the label changed
+kubectl get pods -l env=dev
+
+# Remove a label (append a minus '-' sign to the key)
+kubectl label pod nginx-single env-
+
+# Verify the label is gone
+kubectl get pods --show-labels
+```
+
+#### 1.4.2 The Declarative Way
+In production, labels are defined inside the YAML manifest.
+1. Open [pod-single.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/pod-single.yaml) in your editor.
+2. Add a new label under `metadata.labels`:
+   ```yaml
+   metadata:
+     name: nginx-single
+     labels:
+       app: web-server
+       stage: training
+   ```
+3. Apply the changes:
+   ```bash
+   kubectl apply -f manifests/pod-single.yaml
+   ```
+4. Verify the label was added dynamically:
+   ```bash
+   kubectl get pod nginx-single --show-labels
+   ```
+
+---
+
+### 1.5 Reading Container Logs
+
+Reading container logs is one of the most critical troubleshooting skills for the CKAD.
+
+#### 1.5.1 Single-Container Pod Logs
+To view stdout/stderr from a standard single-container pod:
+```bash
+# Dump all current logs
+kubectl logs nginx-single
+
+# Stream logs in real-time (follow)
+kubectl logs -f nginx-single
+
+# View only the last 10 lines of logs
+kubectl logs nginx-single --tail=10
+
+# View logs from a container that recently crashed (previous run)
+kubectl logs nginx-single --previous # Or -p
+```
+
+#### 1.5.2 Multi-Container Pod Logs
+If a pod has more than one container, you **must** specify which container you want to query using the `-c` (or `--container`) flag. If you do not, the command will error.
+
+Try running this:
+```bash
+# This will fail and list the container names:
+kubectl logs nginx-multi
+```
+Now, retrieve logs from each specific container:
+```bash
+# View logs from the web server container
+kubectl logs nginx-multi -c web-server
+
+# View logs from the background content-generator sidecar
+kubectl logs nginx-multi -c content-generator
+```
 
 ---
 
@@ -192,18 +285,34 @@ kubectl get pods
 
 ### 2.3 Scaling and Self-Healing
 
-#### 2.3.1 Scaling a Deployment
-*   **The Imperative Way** (Instant scaling):
+#### 2.3.1 Scaling a Deployment Up and Down
+Scaling changes the **desired state** (number of replicas) of your deployment. The deployment controller will immediately spin up or terminate pods to reconcile the actual state.
+
+*   **The Imperative Way (Scale Up to 5)**:
+    Let's scale our deployment up to 5 replicas:
     ```bash
-    kubectl scale deployment nginx-deployment --replicas=4
+    kubectl scale deployment nginx-deployment --replicas=5
     ```
-    *Verify:* `kubectl get pods` (you should now see 4 pods).
-*   **The Declarative Way**:
-    Open [deployment.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/deployment.yaml) and modify `replicas: 2` to `replicas: 3`. Apply the changes:
+    *Track the scale-up in real-time:*
     ```bash
-    kubectl apply -f manifests/deployment.yaml
+    kubectl rollout status deployment/nginx-deployment
     ```
-    *Verify:* `kubectl get pods` (the count reconciles back to 3).
+    *Verify that you have 5 pods running:*
+    ```bash
+    kubectl get pods -l app=deploy-web
+    ```
+
+*   **The Declarative Way (Scale Down to 3)**:
+    1. Open [deployment.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/deployment.yaml) in your editor.
+    2. Change `replicas: 2` to `replicas: 3`.
+    3. Apply the modified manifest:
+       ```bash
+       kubectl apply -f manifests/deployment.yaml
+       ```
+    4. Watch the deployment controller terminate 2 excess pods to match the new desired state:
+       ```bash
+       kubectl get pods -l app=deploy-web -w
+       ```
 
 #### 2.3.2 Self-Healing with Liveness Probes
 Our Deployment configuration contains a **Liveness Probe**:
@@ -323,26 +432,65 @@ Review and deploy [service-clusterip.yaml](file:///Users/chasechristensen/scalin
 kubectl apply -f manifests/service-clusterip.yaml
 ```
 
-#### 3.3.3 Inspecting Service Endpoints
-A Service routes traffic to Pods using a dynamic tracking resource called **Endpoints**:
-```bash
-# Get service details
-kubectl get svc nginx-clusterip
+#### 3.3.3 Inspecting Endpoints (How Services Track Pods)
+A Service load-balances traffic across multiple Pods. It tracks which Pods are active and healthy using an internal resource called **Endpoints** (or `EndpointSlices`).
 
-# Get endpoints linked to the service
-kubectl get endpoints nginx-clusterip
-```
-*(Notice that the endpoints list contains the exact internal IP addresses of all pods managed by the `nginx-deployment`)*.
+Whenever a Pod matching the Service selector is created, destroyed, or fails a readiness check, Kubernetes automatically updates the Endpoints list.
 
-#### 3.3.4 Test Service DNS Resolution
-From the `tmp-client` pod, check if the service name resolves to the stable ClusterIP:
-```bash
-kubectl exec tmp-client -- nslookup nginx-clusterip
-```
-Test web traffic routing via the service name:
-```bash
-kubectl exec tmp-client -- wget -O- http://nginx-clusterip
-```
+1.  Inspect the Service definition and look at its IP mapping:
+    ```bash
+    kubectl get svc nginx-clusterip
+    ```
+2.  View the linked Endpoints. Note the list of IP addresses matches your deployment Pods:
+    ```bash
+    kubectl get endpoints nginx-clusterip
+    ```
+    *Output will look similar to:*
+    ```text
+    NAME              ENDPOINTS                                   AGE
+    nginx-clusterip   10.244.1.8:80,10.244.1.9:80,10.244.1.10:80   5m
+    ```
+
+3.  **Hands-On Demonstration of Dynamic Endpoints**:
+    Let's watch how scaling changes our endpoints in real-time.
+    *   In a second terminal window, watch the endpoints:
+        ```bash
+        kubectl get endpoints nginx-clusterip -w
+        ```
+    *   In your main terminal, scale up the deployment:
+        ```bash
+        kubectl scale deployment nginx-deployment --replicas=5
+        ```
+    *   Go back to the watching terminal. Notice how the IPs of the new Pods are automatically appended to the endpoints list.
+    *   Scale the deployment back down to 2:
+        ```bash
+        kubectl scale deployment nginx-deployment --replicas=2
+        ```
+        *Observe the IPs instantly being removed from the endpoints list. This decoupling prevents your frontend clients from trying to connect to dead container IPs!*
+
+#### 3.3.4 Test DNS Resolution & Service Connectivity
+CoreDNS provides internal hostname resolution inside the cluster.
+
+*   **Service DNS Name Format**: `<service-name>.<namespace>.svc.cluster.local`
+*   **Pod DNS Name Format**: `<pod-ip-with-hyphens>.<namespace>.pod.cluster.local`
+
+1.  SSH/exec into the `tmp-client` testing pod:
+    ```bash
+    kubectl exec -it tmp-client -- sh
+    ```
+2.  Resolve the Service name:
+    ```bash
+    nslookup nginx-clusterip
+    ```
+    *(This returns the stable virtual ClusterIP of the Service).*
+3.  Perform a network query using the service name. Traffic is automatically distributed to one of the active backend pods:
+    ```bash
+    wget -O- http://nginx-clusterip
+    ```
+4.  Exit the pod shell:
+    ```bash
+    exit
+    ```
 
 ---
 
