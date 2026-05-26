@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: deploy-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: deploy-web
+  template:
+    metadata:
+      labels:
+        app: deploy-web
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - containerPort: 80
+        # Liveness probe to demonstrate self-healing
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5

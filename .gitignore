@@ -1,0 +1,11 @@
+# Local IaC files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+
+# OS specific files
+.DS_Store
