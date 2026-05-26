@@ -15,11 +15,11 @@ Managed GKE clusters handle the complex control plane (API Server, scheduler, et
 ```mermaid
 graph LR
     LocalMachine[Local Machine <br> kubectl] -->|Internet / Port 443| GKEControl[GKE Control Plane <br> Managed by Google]
-    GKEControl -->|Manages| NodePool[Spot Node Pool <br> 1x e2-medium node]
+    GKEControl -->|Manages| NodePool[Standard Node Pool <br> 1x e2-medium node]
 ```
 
 *   **GKE Control Plane**: Managed by Google (free of charge for one zonal cluster per billing account).
-*   **Spot Node Pool**: A single worker node of machine type `e2-medium` (2 vCPUs, 4GB RAM) running on **Spot VMs** (formerly Preemptible). Spot VMs cost up to 60-80% less than standard VMs, which is perfect for training and workshops.
+*   **Standard Node Pool**: A single worker node of machine type `e2-medium` (2 vCPUs, 4GB RAM) running on standard on-demand VMs to ensure maximum stability and prevent preemptive terminations during the workshop.
 
 ---
 
@@ -195,7 +195,7 @@ Now you can test connection using standard `kubectl` commands.
     ```bash
     kubectl get nodes
     ```
-    *You should see a single Spot node listed in the `Ready` status:*
+    *You should see a single node listed in the `Ready` status:*
     ```text
     NAME                                           STATUS   ROLES    AGE     VERSION
     gke-ckad-cluster-ckad-node-pool-e4f0d611-1jkw   Ready    <none>   3m15s   v1.30.1-gke.1156000

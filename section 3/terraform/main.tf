@@ -57,8 +57,8 @@ resource "google_container_node_pool" "primary_nodes" {
     disk_size_gb = 30
     disk_type    = "pd-standard"
 
-    # Use Spot instances to reduce costs by 60-80% (perfect for workshops)
-    spot = true
+    # Use standard on-demand instances (avoid spot to prevent preemptive termination during workshop)
+    spot = false
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
