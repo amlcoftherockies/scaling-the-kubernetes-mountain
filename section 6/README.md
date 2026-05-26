@@ -180,6 +180,52 @@ kubectl get pod ckad-app-digest -o jsonpath='{.status.containerStatuses[0].image
 
 ---
 
+### 3.3 Image Pull Policies
+
+The **`imagePullPolicy`** field in your Pod specification determines when the node's container runtime (`containerd`) should pull the image from the registry versus using a locally cached image.
+
+There are three available policies:
+
+| Policy | Behavior | Default When |
+| :--- | :--- | :--- |
+| **`Always`** | Kubernetes checks the registry every time the Pod starts. It validates the registry's hash with the local cache; if a newer image exists, it downloads it. | Tag is `:latest` or omitted. |
+| **`IfNotPresent`** | Kubernetes checks the local cache first. If the image is already on the node, it runs it immediately. It **only** pulls from the registry if the image is missing. | Tag is specific (e.g., `:1.0` or `:v2`). |
+| **`Never`** | Kubernetes will **never** query the registry. It assumes the image is already pre-loaded on the node VM. | N/A |
+
+#### 3.3.1 Setting the Policy in YAML
+You define this under the container spec:
+```yaml
+spec:
+  containers:
+  - name: ckad-app
+    image: YOUR_DOCKER_USER/ckad-app:1.0
+    imagePullPolicy: Always # Options: Always, IfNotPresent, Never
+```
+
+#### 3.3.2 Hands-On: Testing the Policies
+
+##### Test 1: Caching Behavior with `IfNotPresent`
+1. Deploy a pod with a specific tag (e.g., `:1.0`). By default, GKE interprets this as `IfNotPresent`.
+2. Delete and recreate the pod. Observe the start time is near-instant because the node skipped downloading the image layers from the registry.
+
+##### Test 2: Overwriting Tags (The Danger of Mutable Tags + `IfNotPresent`)
+1. Re-build your application with a slight change (e.g. edit `main.go` to print "Hello v2" instead) and push it under the **same tag** (`:1.0`).
+2. Re-deploy the Pod. Because the node already has `:1.0` cached, and its policy is `IfNotPresent`, GKE **will not pull** the new image. Your Pod will run the old "v1" code, demonstrating the danger of tag mutation.
+
+##### Test 3: Solving Drift with `Always`
+1. Re-deploy the Pod, but set `imagePullPolicy: Always` in the spec.
+2. Even though the node has `:1.0` cached, `containerd` queries the registry, realizes the SHA256 digest of `:1.0` in the registry is different, pulls the new image layers, and runs the new code.
+
+##### Test 4: Testing `Never` (Failing when not cached)
+1. Deploy a Pod with a non-existent image tag (e.g. `:99.0`) and set `imagePullPolicy: Never`.
+2. Inspect the Pod state:
+   ```bash
+   kubectl get pods
+   ```
+   *Observe the Pod fails immediately with the status **`ErrImageNeverPull`** because the image does not exist locally on the node VM.*
+
+---
+
 ## 🛡️ Module 4: Kubernetes Runtime Class & Container Runtimes (CRI)
 
 The **Container Runtime Interface (CRI)** is the API standard that allows the Kubernetes `kubelet` agent on each node to communicate with the active container runtime (like `containerd`).
