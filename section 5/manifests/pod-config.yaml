@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-config-demo
+spec:
+  containers:
+  - name: app-container
+    image: nginx:1.25-alpine
+    env:
+    # 1. ConfigMap env var injection
+    - name: COLOR
+      valueFrom:
+        configMapKeyRef:
+          name: app-config
+          key: APP_COLOR
+    - name: MODE
+      valueFrom:
+        configMapKeyRef:
+          name: app-config
+          key: APP_MODE
+    # 2. Secret env var injection
+    - name: SECRET_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: app-secret
+          key: API_TOKEN
+    volumeMounts:
+    # 3. ConfigMap volume mount
+    - name: config-vol
+      mountPath: /config
+    # 4. Secret volume mount
+    - name: secret-vol
+      mountPath: /secrets
+      readOnly: true
+  volumes:
+  - name: config-vol
+    configMap:
+      name: app-config
+      items:
+      - key: ui.properties
+        path: ui.properties
+  - name: secret-vol
+    secret:
+      secretName: app-secret
