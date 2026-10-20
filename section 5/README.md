@@ -39,7 +39,7 @@ rm config.txt # Clean up local file
 ```
 
 ##### 3. The Declarative Way (YAML Manifest)
-Review the file [configmap.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/configmap.yaml):
+Review the file [configmap.yaml](manifests/configmap.yaml):
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -87,7 +87,7 @@ Secret values in YAML **must** be Base64 encoded. Let's encode a secret values m
 echo -n "super-secret-token" | base64
 # Output: c3VwZXItc2VjcmV0LXRva2Vu
 ```
-Review and deploy [secret.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/secret.yaml):
+Review and deploy [secret.yaml](manifests/secret.yaml):
 ```bash
 kubectl apply -f manifests/secret.yaml
 ```
@@ -114,7 +114,7 @@ kubectl get secret app-secret -o jsonpath='{.data.API_TOKEN}' | base64 --decode
 
 We can inject ConfigMap and Secret data into containers either as **Environment Variables** or as **Mounted Files**.
 
-Review and deploy [pod-config.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/pod-config.yaml):
+Review and deploy [pod-config.yaml](manifests/pod-config.yaml):
 ```bash
 kubectl apply -f manifests/pod-config.yaml
 ```
@@ -153,64 +153,74 @@ kubectl exec pod-config-demo -- df -hT /secrets
 
 ## 💾 Module 2: Persistent Storage Fundamentals (PVs and PVCs)
 
-Pods are ephemeral; if they die, their local filesystems are lost. To persist data, Kubernetes uses a decoupled architecture of **PersistentVolumes** (infrastructure storage) and **PersistentVolumeClaims** (user storage requests).
+Pods are ephemeral: if they die, their local filesystems are lost. To persist data, Kubernetes splits storage into two objects:
+
+| Object | Scope | Who creates it |
+|---|---|---|
+| **PersistentVolume (PV)** | **Cluster-wide** | A cluster admin by hand, or (almost always) a **provisioner** automatically |
+| **PersistentVolumeClaim (PVC)** | **Your namespace** | **You, the app developer.** It's your request: "I need 1Gi, read-write" |
 
 ```mermaid
 graph LR
-    Pod[Pod] -->|Mounts| PVC[PersistentVolumeClaim <br> Namespace Scope]
-    PVC -->|Binds to| PV[PersistentVolume <br> Cluster Scope]
-    PV -->|Points to| Disk[Physical Storage / HostPath]
+    Pod[Pod] -->|Mounts| PVC["PersistentVolumeClaim (namespace scope)"]
+    PVC -->|Binds to| PV["PersistentVolume (cluster scope)"]
+    SC["StorageClass (default)"] -.->|provisions| PV
+    PV -->|Points to| Disk["Cloud disk / NFS / ..."]
 ```
 
-### 2.1 Storage Abstraction: PersistentVolume (PV)
+As an app developer (and on the CKAD exam) you **ask for storage with a PVC**. A PV is then found for you, or created on the spot, and bound to your claim.
 
-A **PersistentVolume** is a cluster-wide storage asset provisioned by an administrator.
+> [!NOTE]
+> **Shared workshop cluster:** you can **see** PVs (`kubectl get pv`) but not create them, because PVs are cluster-wide. That's normal on real teams too. Everything below works the same on GKE, OKE or any cluster with a default StorageClass.
 
-1.  Review and deploy [pv-static.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/pv-static.yaml):
-    ```bash
-    kubectl apply -f manifests/pv-static.yaml
-    ```
-2.  Inspect the PV:
-    ```bash
-    kubectl get pv
-    kubectl describe pv pv-static-demo
-    ```
-    *Observe that the Status is **`Available`** and the claim mapping is empty. PVs exist cluster-wide and are not bound to any namespace.*
+### 2.1 What a PersistentVolume looks like
+
+Look at the cluster's existing PVs. On a shared cluster you'll see other people's volumes too:
+```bash
+kubectl get pv
+```
+Note the columns: `CAPACITY`, `ACCESS MODES`, `RECLAIM POLICY`, `STATUS` and `CLAIM` (`<namespace>/<pvc-name>`), plus the `STORAGECLASS`.
+
+For reference, [admin/pv-static.yaml](manifests/admin/pv-static.yaml) is a PV an admin would write by hand (a `hostPath` volume with `storageClassName: manual`).
+
+> [!TIP]
+> **Own single-node cluster only:** try static binding with `kubectl apply -f manifests/admin/pv-static.yaml -f manifests/admin/pvc-static.yaml`, then `kubectl get pv,pvc` shows them `Bound` to each other. On the shared cluster, skip this: you can't create PVs, and hostPath volumes are an admin decision.
 
 ---
 
-### 2.2 Storage Request: PersistentVolumeClaim (PVC)
+### 2.2 Ask for storage: the PersistentVolumeClaim
 
-A **PersistentVolumeClaim** is a request for storage by a user. It acts like a "voucher" that searches the cluster for a PersistentVolume that matches its capacity and access mode.
+Review [pvc-demo.yaml](manifests/pvc-demo.yaml). It requests `1Gi` of `ReadWriteOnce` storage and deliberately has **no `storageClassName`**, so the cluster's **default StorageClass** handles it.
 
-1.  Review and deploy [pvc-static.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/pvc-static.yaml):
+1.  Create the claim:
     ```bash
-    kubectl apply -f manifests/pvc-static.yaml
+    kubectl apply -f manifests/pvc-demo.yaml
     ```
-2.  Watch the PVC binding process:
+2.  Check it:
     ```bash
-    kubectl get pvc pvc-static-demo
+    kubectl get pvc pvc-demo
     ```
-    *Notice the status immediately transitions from `Pending` to **`Bound`**.*
-3.  Check the PV status:
-    ```bash
-    kubectl get pv
-    ```
-    *The status of `pv-static-demo` has transitioned to **`Bound`**, showing it is claimed by the PVC.*
+    *You'll most likely see **`Pending`**. That's expected: most default StorageClasses wait until a Pod actually uses the claim before creating the disk (more in Module 3). If yours shows `Bound` immediately, your default class uses `Immediate` binding.*
 
 ---
 
 ### 2.3 Deploying a Pod with Storage
 
-1.  Review and deploy [pod-storage-static.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/pod-storage-static.yaml):
+1.  Review and deploy [pod-storage.yaml](manifests/pod-storage.yaml), which mounts `pvc-demo` at `/data`:
     ```bash
-    kubectl apply -f manifests/pod-storage-static.yaml
+    kubectl apply -f manifests/pod-storage.yaml
+    kubectl get pod pod-storage -w     # wait for Running, then Ctrl+C
     ```
-2.  Describe the Pod to verify the volume mount is active:
+2.  The claim is now `Bound`, and a PV exists **that you never wrote**:
     ```bash
-    kubectl describe pod pod-storage-static
+    kubectl get pvc pvc-demo
+    kubectl get pv | grep pvc-demo     # CLAIM column = <your-namespace>/pvc-demo
     ```
-    *Look at the `Volumes` block to see `data-vol` mapping back to your PVC.*
+3.  Describe the Pod to see the volume wiring:
+    ```bash
+    kubectl describe pod pod-storage
+    ```
+    *Look at the `Volumes` block: `data-vol` maps back to your PVC.*
 
 ---
 
@@ -218,88 +228,99 @@ A **PersistentVolumeClaim** is a request for storage by a user. It acts like a "
 
 Let's verify that data survives Pod deletion.
 
-1.  Write a test file into the mounted directory (`/data`) of the container:
+1.  Write a test file into the mounted directory (`/data`):
     ```bash
-    kubectl exec pod-storage-static -- sh -c "echo 'Kubernetes Persistent Storage Test' > /data/test.txt"
+    kubectl exec pod-storage -- sh -c "echo 'Kubernetes Persistent Storage Test' > /data/test.txt"
     ```
 2.  Delete the Pod:
     ```bash
-    kubectl delete pod pod-storage-static
+    kubectl delete pod pod-storage
     ```
-3.  Recreate the Pod:
+3.  Recreate it:
     ```bash
-    kubectl apply -f manifests/pod-storage-static.yaml
+    kubectl apply -f manifests/pod-storage.yaml
     ```
-4.  Wait for it to transition to `Running`, then read the file from the new Pod:
+4.  Once it's `Running`, read the file from the new Pod:
     ```bash
-    kubectl exec pod-storage-static -- cat /data/test.txt
+    kubectl exec pod-storage -- cat /data/test.txt
     ```
-    *Verify that you see: `Kubernetes Persistent Storage Test`. The storage persisted because it lives outside the Pod's lifecycle.*
+    *You should see `Kubernetes Persistent Storage Test`. The data survived because it lives on the PV, outside the Pod's lifecycle.*
 
 ---
 
 ## ⚡ Module 3: Dynamic Provisioning & Storage Topology
 
-Static provisioning requires admins to manually create PVs beforehand. In modern cloud environments, we use **StorageClasses** to automatically provision PVs on demand.
+Who created that PV? A **StorageClass**. It names a **provisioner** (a CSI driver for your cloud's disks) and the settings to use. When a PVC asks for storage, the provisioner creates a disk plus a matching PV automatically. This is called **dynamic provisioning**.
 
-### 3.1 Dynamic Provisioning
+### 3.1 Find the Default StorageClass
 
-1.  Examine the available StorageClasses in your cluster:
+1.  List the StorageClasses:
     ```bash
     kubectl get storageclass
     ```
-    *(In GKE, you will see a default StorageClass named `standard` with the provisioner `pd.csi.storage.gke.io`).*
-2.  Describe the standard StorageClass:
-    ```bash
-    kubectl describe storageclass standard
-    ```
-3.  Review and deploy [pvc-dynamic.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/pvc-dynamic.yaml):
-    ```bash
-    kubectl apply -f manifests/pvc-dynamic.yaml
-    ```
-4.  Monitor the PVC:
-    ```bash
-    kubectl get pvc pvc-dynamic-demo -w
-    ```
-    *(Depending on the cloud settings, the PVC may stay in the `Pending` status. This is because GKE defaults to delaying disk provisioning until a Pod requesting the storage is scheduled to a specific node zone).*
+    *One is marked **`(default)`**. That's the one your PVC used because it didn't name a class. Common defaults:*
 
-5.  Deploy the Pod to consume the dynamic storage:
-    ```bash
-    kubectl apply -f manifests/pod-storage-dynamic.yaml
-    ```
-6.  Observe the PVC transition to `Bound` and check the dynamically created PV:
-    ```bash
-    kubectl get pvc pvc-dynamic-demo
-    kubectl get pv
-    ```
-    *(Google Cloud dynamically created a Persistent Disk in the background, bound it as a PV, and mounted it to your GKE node!)*
+    | Cluster | Default class | Provisioner |
+    |---|---|---|
+    | GKE | `standard-rwo` | `pd.csi.storage.gke.io` (Persistent Disk) |
+    | Oracle OKE | `oci-bv` | `blockvolume.csi.oraclecloud.com` (Block Volume, 50 GB minimum) |
+    | kind / minikube | `standard` | a local-path / hostPath provisioner |
 
-7.  Describe the PVC to see GKE's provisioning logs:
+2.  Describe it (replace `<default-class>` with yours):
     ```bash
-    kubectl describe pvc pvc-dynamic-demo
+    kubectl describe storageclass <default-class>
     ```
+    *Note `Provisioner`, `ReclaimPolicy` and `VolumeBindingMode`.*
+
+3.  See the provisioning story in your PVC's events:
+    ```bash
+    kubectl describe pvc pvc-demo
+    ```
+    *You'll see `WaitForFirstConsumer` → `Provisioning` → `ProvisioningSucceeded`.*
+
+> [!TIP]
+> **CKAD:** to pick a non-default class, set `spec.storageClassName: <name>` in the PVC. To force *no* dynamic provisioning (static binding to an existing PV), set `storageClassName: ""`.
 
 ---
 
 ### 3.2 Access Modes
 
 Kubernetes supports different access modes for volumes:
-*   **`ReadWriteOnce` (RWO)**: The volume can be mounted as read-write by a single Node. (Standard block storage like GCE Persistent Disks).
-*   **`ReadOnlyMany` (ROX)**: The volume can be mounted as read-only by many Nodes.
-*   **`ReadWriteMany` (RWX)**: The volume can be mounted as read-write by many Nodes. (Required for shared filesystems, like Google Filestore or NFS, allowing multiple Pods on different VMs to read/write concurrently).
+*   **`ReadWriteOnce` (RWO)**: mounted read-write by a single **node**. This is standard block storage (Persistent Disk, OCI Block Volume, EBS).
+*   **`ReadOnlyMany` (ROX)**: mounted read-only by many nodes.
+*   **`ReadWriteMany` (RWX)**: mounted read-write by many nodes. This needs a shared filesystem (Filestore, OCI File Storage, NFS) so Pods on different VMs can read and write concurrently.
+*   **`ReadWriteOncePod` (RWOP)**: mounted read-write by a single **Pod**.
 
 ---
 
 ### 3.3 Storage Topology & Wait For First Consumer
 
-Cloud disks are **zonal**. If a disk is provisioned in zone `us-central1-a`, and the Kubernetes scheduler places the Pod in zone `us-central1-b`, the Pod will fail to start (`Multi-Zone Mount Failure`).
+Cloud disks are **zonal** (Oracle calls zones *availability domains*). If a disk is created in zone A and the scheduler puts the Pod on a node in zone B, the disk can't attach and the Pod never starts.
+
+1.  See which zone each node is in:
+    ```bash
+    kubectl get nodes -L topology.kubernetes.io/zone
+    ```
+2.  See which zone **your** PV was created in:
+    ```bash
+    kubectl get pv $(kubectl get pvc pvc-demo -o jsonpath='{.spec.volumeName}') -o jsonpath='{.spec.nodeAffinity}'; echo
+    ```
 
 #### The Solution: `volumeBindingMode: WaitForFirstConsumer`
-Open your StorageClass description again:
 ```bash
-kubectl get storageclass standard -o yaml
+kubectl get storageclass <default-class> -o jsonpath='{.volumeBindingMode}'; echo
 ```
-Look at **`volumeBindingMode: WaitForFirstConsumer`**. This parameter instructs Kubernetes to **not** provision the disk immediately when the PVC is created. Instead, it waits until the Pod is assigned a Node by the scheduler, and then provisions the volume in the exact same zone, ensuring locality and scheduling compatibility.
+**`WaitForFirstConsumer`** tells Kubernetes **not** to create the disk when the PVC is created. It waits until the scheduler has picked a node for the Pod, then creates the disk in that node's zone. That's why your PVC was `Pending` until the Pod existed.
+
+### 3.4 Reclaim Policy: What Happens When You Delete the Claim
+
+Dynamically provisioned PVs usually have `RECLAIM POLICY: Delete`. Delete the claim, and the PV and the cloud disk go with it:
+```bash
+kubectl delete pod pod-storage
+kubectl delete pvc pvc-demo
+kubectl get pv | grep pvc-demo     # gone after a few seconds
+```
+*With `Retain`, the PV would stay (`Released`) and an admin would have to clean it up. That's useful for precious data.*
 
 ---
 
@@ -311,11 +332,11 @@ Deployments are designed for stateless applications. For applications that requi
 
 A StatefulSet requires a **Headless Service** (a Service with `clusterIP: None`) to handle DNS resolution for individual pods.
 
-1.  Review and deploy the Headless Service [service-headless.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/service-headless.yaml):
+1.  Review and deploy the Headless Service [service-headless.yaml](manifests/service-headless.yaml):
     ```bash
     kubectl apply -f manifests/service-headless.yaml
     ```
-2.  Review and deploy the StatefulSet [statefulset.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%205/manifests/statefulset.yaml):
+2.  Review and deploy the StatefulSet [statefulset.yaml](manifests/statefulset.yaml):
     ```bash
     kubectl apply -f manifests/statefulset.yaml
     ```
@@ -345,13 +366,16 @@ Because we deployed a Headless Service, CoreDNS creates a direct A record for ea
 
 1.  Spin up a temporary busybox testing pod:
     ```bash
-    kubectl run tmp-dns --image=busybox:1.36 --restart=Never -- sleep 3600
+    kubectl run tmp-dns --image=docker.io/library/busybox:1.36 --restart=Never -- sleep 3600
     ```
-2.  Resolve the individual Pod DNS names:
+2.  Resolve the individual Pod DNS names. The format is `<pod>.<headless-service>.<namespace>.svc.cluster.local`:
     ```bash
-    kubectl exec tmp-dns -- nslookup web-0.nginx-headless
-    kubectl exec tmp-dns -- nslookup web-1.nginx-headless
+    NS=$(kubectl config view --minify -o jsonpath='{..namespace}'); NS=${NS:-default}
+    kubectl exec tmp-dns -- nslookup web-0.nginx-headless.$NS.svc.cluster.local
+    kubectl exec tmp-dns -- nslookup web-1.nginx-headless.$NS.svc.cluster.local
     ```
+    > [!NOTE]
+    > Why the full name? `busybox:1.36`'s `nslookup` doesn't apply search domains to names that already contain a dot, so the short `web-0.nginx-headless` returns `NXDOMAIN` even though the record exists. Apps don't have this problem: `kubectl exec tmp-dns -- wget -qO- http://web-0.nginx-headless` resolves fine.
     *Observe that each DNS query resolves directly to the unique IP address of that specific Pod.*
 
 ---
@@ -394,9 +418,9 @@ A StatefulSet uses **`volumeClaimTemplates`** to dynamically provision a dedicat
 After completing this section, clean up all configuration, storage, and stateful resources:
 
 ```bash
-kubectl delete -f manifests/
+kubectl delete -f manifests/ --ignore-not-found      # admin/ is not included (not recursive)
+kubectl delete pvc www-web-0 www-web-1 --ignore-not-found   # StatefulSet claims are never auto-deleted
 kubectl delete pod tmp-dns
-kubectl delete pvc app-config-file app-config-literal 2>/dev/null || true
-kubectl delete configmap app-config-file app-config-literal 2>/dev/null || true
-kubectl delete secret app-secret-literal 2>/dev/null || true
+kubectl delete configmap app-config-file app-config-literal --ignore-not-found
+kubectl delete secret app-secret-literal --ignore-not-found
 ```

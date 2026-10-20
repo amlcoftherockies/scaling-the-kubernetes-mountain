@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:1.25-alpine
+        image: docker.io/library/nginx:1.25-alpine
         ports:
         - containerPort: 80
           name: web
@@ -27,7 +27,7 @@ spec:
       name: www
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: "standard"
+      # No storageClassName: each replica's PVC uses the cluster's default StorageClass.
       resources:
         requests:
-          storage: 1Gi
+          storage: 1Gi   # some clouds round up (OCI block volumes are 50 GB minimum)

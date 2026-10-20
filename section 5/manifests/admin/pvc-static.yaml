@@ -1,3 +1,5 @@
+# Pairs with admin/pv-static.yaml (static binding by storageClassName: manual).
+# Own cluster only: on the shared cluster there's no such PV, so this stays Pending.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

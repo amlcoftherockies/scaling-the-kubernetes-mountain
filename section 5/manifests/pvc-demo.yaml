@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-demo
+spec:
+  # No storageClassName: the cluster's DEFAULT StorageClass handles it
+  # (GKE: standard-rwo, OKE: oci-bv, ...). Run `kubectl get storageclass`
+  # and look for "(default)".
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi   # some clouds round up (OCI block volumes are 50 GB minimum)

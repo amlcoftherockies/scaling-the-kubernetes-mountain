@@ -1,14 +1,27 @@
 output "cluster_name" {
-  value       = google_container_cluster.primary.name
-  description = "The name of the GKE cluster."
+  value       = oci_containerengine_cluster.this.name
+  description = "The name of your OKE cluster."
 }
 
-output "cluster_endpoint" {
-  value       = google_container_cluster.primary.endpoint
-  description = "The Kubernetes API server endpoint."
+output "compartment_ocid" {
+  value       = local.compartment_id
+  description = "YOUR compartment. Section 6 reads this to create your registry repository."
+}
+
+output "compartment_name" {
+  value = "lab:${local.compartment_name}"
+}
+
+output "cluster_id" {
+  value       = oci_containerengine_cluster.this.id
+  description = "The OCID of your OKE cluster."
+}
+
+output "kubernetes_version" {
+  value = local.k8s_version
 }
 
 output "kubeconfig_command" {
-  value       = "gcloud container clusters get-credentials ${google_container_cluster.primary.name} --zone ${var.gcp_zone} --project ${var.gcp_project_id}"
-  description = "Copy and run this command on your local machine to fetch the kubeconfig and connect to the cluster."
+  description = "Run this to point kubectl at your cluster."
+  value       = "oci ce cluster create-kubeconfig --cluster-id ${oci_containerengine_cluster.this.id} --file $HOME/.kube/config --region ${var.region} --token-version 2.0.0 --kube-endpoint PUBLIC_ENDPOINT --profile ${var.oci_profile}"
 }

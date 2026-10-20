@@ -5,7 +5,8 @@ metadata:
 spec:
   containers:
   - name: ckad-app
-    # Replace with your actual registry user and image SHA256 digest
-    image: YOUR_DOCKER_USER/ckad-app@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    # Replace with YOUR image by digest: <repository>@sha256:<digest>
+    # (from: docker inspect --format='{{index .RepoDigests 0}}' <image>:<tag>)
+    image: ttl.sh/ckad-app-YOURNAME@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
     ports:
     - containerPort: 8080

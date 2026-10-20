@@ -1,0 +1,17 @@
+# CLUSTER-ADMIN EXAMPLE (read along on the shared workshop cluster).
+# PersistentVolumes are cluster-scoped, so only admins create them by hand.
+# On your OWN single-node practice cluster you can apply this together with
+# admin/pvc-static.yaml to see static binding (storageClassName: manual).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-static-demo
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /tmp/data

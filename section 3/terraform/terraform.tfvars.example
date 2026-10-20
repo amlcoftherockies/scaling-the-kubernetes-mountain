@@ -1,4 +1,11 @@
-# GCP Configuration
-gcp_project_id = "your-gcp-project-id-here"
-gcp_region     = "us-central1"
-gcp_zone       = "us-central1-a"
+# Copy to terraform.tfvars, then edit:   cp terraform.tfvars.example terraform.tfvars
+
+# Workshop (parent) compartment -- provided by your instructor. Leave as-is.
+lab_compartment_ocid = "ocid1.compartment.oc1..aaaaaaaadgxmy5slqfhbbxi7zbefli3fadsyvg3fng5ppti6amfe3r3uxhgq"
+
+# The email your Oracle Cloud invite was sent to. Terraform uses it to find
+# YOUR compartment, lab:<email with @ replaced by _>, e.g. lab:jsmith_example.com
+email = "CHANGEME@example.com"
+
+# Only change this if you passed --profile to `oci setup bootstrap`.
+# oci_profile = "DEFAULT"

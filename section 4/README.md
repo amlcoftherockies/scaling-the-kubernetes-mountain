@@ -24,7 +24,10 @@ Run the following command on your local machine:
 ```bash
 kubectl get nodes -o wide
 ```
-Look at the **`CONTAINER-RUNTIME`** column. If you deployed your cluster using the GKE setup from Section 3, you will see `containerd://1.7.x-gke...`.
+Look at the **`CONTAINER-RUNTIME`** column. Depending on your cluster you will see `containerd://1.x.x` (GKE, most clusters) or `cri-o://1.x.x` (Oracle OKE). Kubernetes doesn't care which one: both speak the same CRI.
+
+> [!NOTE]
+> On the shared workshop cluster you have **read-only** access to nodes: `get` and `describe` work, but changing nodes doesn't.
 
 > [!NOTE]
 > On self-managed clusters (like the `kubeadm` setup), if you SSH directly into a node, you can use the low-level **`crictl`** command-line tool (which is pre-configured to talk to the CRI socket) to inspect containers:
@@ -41,7 +44,7 @@ Look at the **`CONTAINER-RUNTIME`** column. If you deployed your cluster using t
 #### 1.2.1 The Imperative Way (Fast Deployment)
 Generate and deploy a single Nginx pod instantly:
 ```bash
-kubectl run nginx-imperative --image=nginx:1.25-alpine
+kubectl run nginx-imperative --image=docker.io/library/nginx:1.25-alpine
 ```
 *Verify it is running:*
 ```bash
@@ -49,7 +52,7 @@ kubectl get pods
 ```
 
 #### 1.2.2 The Declarative Way (YAML Configuration)
-Review the file [pod-single.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/pod-single.yaml):
+Review the file [pod-single.yaml](manifests/pod-single.yaml):
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -60,7 +63,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:1.25-alpine
+    image: docker.io/library/nginx:1.25-alpine
     ports:
     - containerPort: 80
 ```
@@ -80,7 +83,7 @@ kubectl get pod nginx-single -o yaml
 #### 1.2.4 Multi-Container Pods (Shared Network & Storage)
 Containers inside a single Pod share the same network namespace (they share the same IP address and can talk to each other via `localhost`) and can share volumes.
 
-Review [pod-multi.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/pod-multi.yaml). It defines a web-server container and a sidecar container that generates content and writes it to a shared `emptyDir` volume.
+Review [pod-multi.yaml](manifests/pod-multi.yaml). It defines a web-server container and a sidecar container that generates content and writes it to a shared `emptyDir` volume.
 
 Deploy the multi-container pod:
 ```bash
@@ -108,21 +111,23 @@ Kubernetes achieves container isolation using native Linux Kernel features:
 At the cluster layer, Kubernetes provides **Namespaces** to logically partition resources and scope access control.
 
 #### Hands-On: Namespace Isolation
+
+> [!NOTE]
+> **Shared workshop cluster:** you can't create namespaces. You've been given one, and it's already your default. Steps 1–2 will return `Forbidden`, which is the isolation lesson itself. Do steps 3–4 with `kube-system` instead of `practice-ns`. On **your own cluster** you're the admin, and every step works.
+
 1.  Create a new namespace imperatively:
     ```bash
     kubectl create namespace practice-ns
     ```
 2.  Deploy a pod inside the new namespace:
     ```bash
-    kubectl run nginx-isolated --image=nginx:1.25-alpine -n practice-ns
+    kubectl run nginx-isolated --image=docker.io/library/nginx:1.25-alpine -n practice-ns
     ```
-3.  Check if the pod is visible in your default view:
+3.  Check whether the pod is visible in your default view:
     ```bash
     kubectl get pods
     ```
-    kubectl get pods -n practice-ns
-    ```
-    *(The pod will not appear, because you are currently looking at the `default` namespace).*
+    *(The pod won't appear: `kubectl` only shows your current namespace. Check which one that is with `kubectl config view --minify -o jsonpath='{..namespace}'`.)*
 4.  Query the namespace explicitly:
     ```bash
     kubectl get pods -n practice-ns
@@ -162,7 +167,7 @@ kubectl get pods --show-labels
 
 #### 1.4.2 The Declarative Way
 In production, labels are defined inside the YAML manifest.
-1. Open [pod-single.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/pod-single.yaml) in your editor.
+1. Open [pod-single.yaml](manifests/pod-single.yaml) in your editor.
 2. Add a new label under `metadata.labels`:
    ```yaml
    metadata:
@@ -229,7 +234,7 @@ In production, you rarely deploy Pods directly. Instead, you use controllers lik
 
 A **ReplicaSet**'s purpose is to maintain a stable, running set of replica Pods at any given time.
 
-1.  Review and deploy [replicaset.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/replicaset.yaml):
+1.  Review and deploy [replicaset.yaml](manifests/replicaset.yaml):
     ```bash
     kubectl apply -f manifests/replicaset.yaml
     ```
@@ -260,12 +265,12 @@ A **Deployment** wraps around a ReplicaSet. It provides declarative updates for 
 #### 2.2.1 CKAD Tip: Generate a manifest template imperatively
 Rather than writing YAML from scratch, you can generate a template:
 ```bash
-kubectl create deployment nginx-deployment --image=nginx:1.25-alpine --replicas=2 --dry-run=client -o yaml > dry-run-deployment.yaml
+kubectl create deployment nginx-deployment --image=docker.io/library/nginx:1.25-alpine --replicas=2 --dry-run=client -o yaml > dry-run-deployment.yaml
 ```
 *Inspect `dry-run-deployment.yaml` to see how easy it is to generate clean YAML skeleton configurations.*
 
 #### 2.2.2 Deploy and Inspect a Deployment
-Deploy the pre-written [deployment.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/deployment.yaml):
+Deploy the pre-written [deployment.yaml](manifests/deployment.yaml):
 ```bash
 kubectl apply -f manifests/deployment.yaml
 ```
@@ -303,7 +308,7 @@ Scaling changes the **desired state** (number of replicas) of your deployment. T
     ```
 
 *   **The Declarative Way (Scale Down to 3)**:
-    1. Open [deployment.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/deployment.yaml) in your editor.
+    1. Open [deployment.yaml](manifests/deployment.yaml) in your editor.
     2. Change `replicas: 2` to `replicas: 3`.
     3. Apply the modified manifest:
        ```bash
@@ -352,7 +357,7 @@ Let's break one of the pods to watch self-healing in action:
 When you modify the Pod Template spec of a Deployment (such as updating an image version), the Deployment controller triggers a **Rolling Update**. It replaces old pods with new pods at a controlled rate, ensuring zero downtime.
 
 1.  **Declaratively Trigger a Rollout**:
-    Open [deployment.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/deployment.yaml) in your editor and update the container image from `nginx:1.25-alpine` to `nginx:1.26-alpine`. Apply the update:
+    Open [deployment.yaml](manifests/deployment.yaml) in your editor and update the container image from `nginx:1.25-alpine` to `nginx:1.26-alpine`. Apply the update:
     ```bash
     kubectl apply -f manifests/deployment.yaml
     ```
@@ -396,19 +401,20 @@ Kubernetes runs a cluster-dns service (CoreDNS) that automatically registers hos
 
 1.  Spin up a temporary busybox client pod:
     ```bash
-    kubectl run tmp-client --image=busybox:1.36 --restart=Never -- sleep 3600
+    kubectl run tmp-client --image=docker.io/library/busybox:1.36 --restart=Never -- sleep 3600
     ```
-2.  Retrieve the IP address of `nginx-single`:
+2.  Retrieve the IP address of `nginx-single`, and your current namespace:
     ```bash
     kubectl get pod nginx-single -o custom-columns=IP:.status.podIP
+    NS=$(kubectl config view --minify -o jsonpath='{..namespace}'); NS=${NS:-default}; echo $NS
     ```
-    *(Let's assume the IP is `10.244.1.5`).*
+    *(Let's assume the IP is `10.244.1.5`.)*
 3.  **Test Pod DNS**:
-    From inside your `tmp-client` container, query the DNS name of the pod. Replace dots in the IP with hyphens (`10-244-1-5`):
+    From inside your `tmp-client` container, query the DNS name of the pod. Replace the dots in the IP with hyphens (`10-244-1-5`):
     ```bash
-    kubectl exec tmp-client -- nslookup 10-244-1-5.default.pod.cluster.local
+    kubectl exec tmp-client -- nslookup 10-244-1-5.$NS.pod.cluster.local
     ```
-    *CoreDNS will successfully resolve the DNS entry back to the Pod IP.*
+    *CoreDNS resolves the name back to the Pod IP.*
 
 ---
 
@@ -427,7 +433,7 @@ kubectl get svc nginx-imperative-svc
 ```
 
 #### 3.3.2 The Declarative Way
-Review and deploy [service-clusterip.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/service-clusterip.yaml):
+Review and deploy [service-clusterip.yaml](manifests/service-clusterip.yaml):
 ```bash
 kubectl apply -f manifests/service-clusterip.yaml
 ```
@@ -482,7 +488,7 @@ CoreDNS provides internal hostname resolution inside the cluster.
     ```bash
     nslookup nginx-clusterip
     ```
-    *(This returns the stable virtual ClusterIP of the Service).*
+    *(This returns the stable virtual ClusterIP of the Service. On cloud clusters busybox may also print `** server can't find ...: NXDOMAIN` for extra search domains, such as `*.internal`, and exit 1. Ignore those lines: the first `Name:`/`Address:` answer is the one that matters.)*
 3.  Perform a network query using the service name. Traffic is automatically distributed to one of the active backend pods:
     ```bash
     wget -O- http://nginx-clusterip
@@ -494,11 +500,11 @@ CoreDNS provides internal hostname resolution inside the cluster.
 
 ---
 
-### 3.4 Traffic Exposure (NodePort & Port Forwarding)
+### 3.4 Traffic Exposure (NodePort, LoadBalancer & Port Forwarding)
 
 A **NodePort Service** exposes the service on each Node's IP at a statically allocated port in the `30000-32767` range. This allows external clients to connect to your cluster.
 
-1.  Review and deploy [service-nodeport.yaml](file:///Users/chasechristensen/scaling-the-kubernetes-mountain/section%204/manifests/service-nodeport.yaml):
+1.  Review and deploy [service-nodeport.yaml](manifests/service-nodeport.yaml):
     ```bash
     kubectl apply -f manifests/service-nodeport.yaml
     ```
@@ -509,10 +515,33 @@ A **NodePort Service** exposes the service on each Node's IP at a statically all
     *Look at the `PORT(S)` column. It will show something like `80:31942/TCP`. In this case, `31942` is the NodePort.*
 
 3.  **Accessing NodePort**:
-    If you are running GKE, node IPs are protected by default cloud firewalls. However, any local VM or routing client can access the web application by running:
+    Workshop clusters (OKE and GKE alike) keep worker nodes in a **private network with no public IPs**, so you can't reach a NodePort from your laptop directly. Prove the NodePort works from *inside* the cluster network by calling a node's internal IP:
     ```bash
-    curl http://<ANY_NODE_PUBLIC_IP>:<ASSIGNED_NODEPORT>
+    # Grab one node's INTERNAL-IP
+    kubectl get nodes -o wide
+
+    # Call the NodePort from a throwaway pod
+    kubectl run np-test --rm -it --image=docker.io/library/busybox:1.36 --restart=Never -- \
+      wget -qO- http://<NODE_INTERNAL_IP>:<ASSIGNED_NODEPORT>
     ```
+    *On a cluster whose nodes do have public IPs (and a firewall rule allowing the port), `curl http://<NODE_PUBLIC_IP>:<NODEPORT>` works from anywhere.*
+
+4.  **Exposing to the Internet with a LoadBalancer**:
+    This is how many clusters publish apps. A `type: LoadBalancer` Service is a NodePort Service *plus* a cloud load balancer that forwards to those NodePorts. Change the existing Service's type in place:
+    ```bash
+    kubectl patch svc nginx-nodeport -p '{"spec":{"type":"LoadBalancer"}}'
+    kubectl get svc nginx-nodeport -w   # wait for EXTERNAL-IP (1-3 min), then Ctrl+C
+    curl http://<EXTERNAL-IP>
+    ```
+    *Notice the NodePort number in `PORT(S)` didn't change: the cloud load balancer simply sends traffic to it on every node.*
+
+    Load balancers cost money while they exist, so switch it back when you're done:
+    ```bash
+    kubectl patch svc nginx-nodeport -p '{"spec":{"type":"NodePort"}}'
+    ```
+
+    > [!NOTE]
+    > **Shared workshop cluster:** the patch fails with `exceeded quota: ... services.loadbalancers=0`. That's on purpose: 30 people × 1 load balancer each would be slow and expensive. Instead, everyone shares **one** load balancer and attaches their app to it with an HTTPRoute or Ingress on their own hostname. That's the [shared Gateway](../section%203/gke/README.md#expose-an-application-shared-gateway), and it's how most production clusters do it too.
 
 #### 🔌 Pro-Tip: Port Forwarding (Quick local testing)
 During CKAD exams or local dev work, instead of setting up NodePorts or LoadBalancers, you can tunnel traffic from your local host port directly to the Service:
@@ -530,5 +559,5 @@ After finishing this section, clean up all practice resources:
 kubectl delete -f manifests/
 kubectl delete pod tmp-client nginx-imperative
 kubectl delete svc nginx-imperative-svc
-kubectl delete namespace practice-ns
+kubectl delete namespace practice-ns   # own cluster only (on the shared cluster you never created it)
 ```

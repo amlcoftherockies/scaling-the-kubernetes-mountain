@@ -1,0 +1,51 @@
+# Expose an app through the workshop's shared Gateway (GCP lab version).
+#
+# Replace MY_HOST with the hostname from your welcome email, e.g.
+#   jsmith-example-com.34-70-75-61.nip.io
+# then:
+#   sed "s/MY_HOST/<your hostname>/" hello-gateway.yaml | kubectl apply -f -
+#   curl http://<your hostname>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: hello }
+  template:
+    metadata:
+      labels: { app: hello }
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:stable
+          ports:
+            - containerPort: 80
+---
+# A plain ClusterIP Service: only reachable inside the cluster...
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+spec:
+  selector: { app: hello }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# ...until an HTTPRoute attaches it to the shared Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hello
+spec:
+  parentRefs:
+    - name: lab-gateway
+      namespace: lab-ingress
+  hostnames:
+    - MY_HOST
+  rules:
+    - backendRefs:
+        - name: hello
+          port: 80

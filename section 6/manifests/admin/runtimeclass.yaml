@@ -1,0 +1,10 @@
+# CLUSTER-ADMIN EXAMPLE. RuntimeClasses are cluster-scoped.
+# Check first: `kubectl get runtimeclass`. GKE (and the shared workshop cluster)
+# already provides `gvisor`; don't re-create it there. On your own cluster this only
+# works if an admin has installed the matching handler (runsc) on the nodes.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+# The handler specifies the name of the CRI configuration in containerd
+handler: gvisor

@@ -1,15 +1,15 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: pod-storage-static
+  name: pod-storage
 spec:
   containers:
   - name: app-container
-    image: nginx:1.25-alpine
+    image: docker.io/library/nginx:1.25-alpine
     volumeMounts:
     - name: data-vol
       mountPath: /data
   volumes:
   - name: data-vol
     persistentVolumeClaim:
-      claimName: pvc-static-demo
+      claimName: pvc-demo

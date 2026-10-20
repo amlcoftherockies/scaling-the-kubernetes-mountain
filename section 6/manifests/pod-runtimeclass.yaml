@@ -7,6 +7,6 @@ spec:
   runtimeClassName: gvisor
   containers:
   - name: nginx
-    image: nginx:1.25-alpine
+    image: docker.io/library/nginx:1.25-alpine
     ports:
     - containerPort: 80

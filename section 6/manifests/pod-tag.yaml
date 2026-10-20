@@ -5,7 +5,8 @@ metadata:
 spec:
   containers:
   - name: ckad-app
-    # Replace 'YOUR_DOCKER_USER' or 'YOUR_GCP_PROJECT' with your actual registry path
-    image: YOUR_DOCKER_USER/ckad-app:1.0
+    # Replace with YOUR image by tag, e.g. ttl.sh/ckad-app-jsmith:1h
+    # (Private registry? add `imagePullSecrets: [{name: regcred}]` under spec; see Module 2.3.)
+    image: ttl.sh/ckad-app-YOURNAME:1h
     ports:
     - containerPort: 8080
