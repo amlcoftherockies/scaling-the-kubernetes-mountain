@@ -1,0 +1,28 @@
+# Restricts OUTBOUND (Egress) traffic from `role: untrusted` Pods so they can
+# ONLY resolve DNS (UDP/TCP 53) and connect to `app: public-api` on TCP 8080.
+# Any connection attempt to `backend-api` (or external IPs) is dropped!
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-intruder-egress
+spec:
+  podSelector:
+    matchLabels:
+      role: untrusted
+  policyTypes:
+  - Egress
+  egress:
+  # 1. Allow CoreDNS resolution inside the cluster
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # 2. Only allow HTTP requests to Pods labeled `app: public-api`
+  - to:
+    - podSelector:
+        matchLabels:
+          app: public-api
+    ports:
+    - protocol: TCP
+      port: 8080

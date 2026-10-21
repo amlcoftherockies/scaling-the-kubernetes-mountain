@@ -1,0 +1,34 @@
+# Gateway API HTTPRoute (gateway.networking.k8s.io/v1)
+# Demonstrates header-based routing (X-Canary: true -> v2-svc) and
+# weighted canary traffic splitting (75% v1-svc / 25% v2-svc)!
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-httproute
+spec:
+  parentRefs:
+  - name: lab-gateway
+    namespace: lab-ingress
+  hostnames:
+  - "MY_HOST"
+  rules:
+  # Rule 1: Any request with header `X-Canary: true` goes 100% to v2-svc
+  - matches:
+    - headers:
+      - name: X-Canary
+        value: "true"
+    backendRefs:
+    - name: v2-svc
+      port: 80
+  # Rule 2: Default traffic is split 75% to v1-svc and 25% to v2-svc
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: v1-svc
+      port: 80
+      weight: 75
+    - name: v2-svc
+      port: 80
+      weight: 25

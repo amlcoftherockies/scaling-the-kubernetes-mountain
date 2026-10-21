@@ -1,0 +1,7 @@
+# Ignore local build artifacts, git metadata, and editor files
+# so they never bloat the build context or invalidate Docker layer cache.
+.git
+.gitignore
+*.md
+Dockerfile*
+.DS_Store

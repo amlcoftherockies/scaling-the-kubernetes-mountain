@@ -1,0 +1,60 @@
+# Blue Deployment (v1 - Live in Production)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bg-demo
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: bg-demo
+        version: blue
+    spec:
+      containers:
+      - name: web
+        image: hashicorp/http-echo:1.0
+        args: ["-listen=:8080", "-text=BLUE environment (v1.0)"]
+        ports:
+        - containerPort: 8080
+---
+# Green Deployment (v2 - Staged & Tested alongside Blue)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bg-demo
+      version: green
+  template:
+    metadata:
+      labels:
+        app: bg-demo
+        version: green
+    spec:
+      containers:
+      - name: web
+        image: hashicorp/http-echo:1.0
+        args: ["-listen=:8080", "-text=GREEN environment (v2.0)"]
+        ports:
+        - containerPort: 8080
+---
+# Production Service — initially routes 100% of traffic to BLUE
+apiVersion: v1
+kind: Service
+metadata:
+  name: bg-service
+spec:
+  selector:
+    app: bg-demo
+    version: blue
+  ports:
+  - port: 80
+    targetPort: 8080

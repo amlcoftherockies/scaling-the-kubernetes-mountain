@@ -1,0 +1,22 @@
+# CronJob: Triggers a Job on a recurring cron schedule (every minute: "*/1 * * * *")
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-cleanup-cron
+spec:
+  schedule: "*/1 * * * *"          # Runs every 1 minute
+  successfulJobsHistoryLimit: 2    # Keep only the last 2 succeeded Jobs
+  failedJobsHistoryLimit: 1        # Keep only the last 1 failed Job
+  concurrencyPolicy: Forbid        # Forbid overlapping runs if previous Job is still running
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: docker.io/library/busybox:1.36
+            command:
+            - sh
+            - -c
+            - echo "[$(date)] Running scheduled database cleanup..."

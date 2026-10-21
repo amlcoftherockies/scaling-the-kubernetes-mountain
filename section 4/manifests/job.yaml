@@ -1,0 +1,24 @@
+# Batch Job: Runs 4 parallel worker completions (2 at a time) to process a batch task
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-report-job
+spec:
+  completions: 4             # Total number of successful Pod runs required
+  parallelism: 2             # Run up to 2 Pods concurrently
+  backoffLimit: 3            # Max retries before marking the Job as Failed
+  activeDeadlineSeconds: 120 # Kill the Job if it runs longer than 120 seconds
+  template:
+    spec:
+      # Jobs MUST set restartPolicy to Never or OnFailure (Always is forbidden!)
+      restartPolicy: OnFailure
+      containers:
+      - name: worker
+        image: docker.io/library/busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "Processing batch item on $(hostname) at $(date)..."
+          sleep 2
+          echo "Batch item completed successfully!"

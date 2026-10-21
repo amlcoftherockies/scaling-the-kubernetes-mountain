@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storefront
+  template:
+    metadata:
+      labels:
+        app: storefront
+    spec:
+      containers:
+      - name: web
+        image: docker.io/library/nginx:1.25-alpine
+        ports:
+        - containerPort: 80
+        envFrom:
+        - configMapRef:
+            name: storefront-config

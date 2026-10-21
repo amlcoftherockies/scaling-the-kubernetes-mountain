@@ -74,6 +74,12 @@ kubectl get nodes                        # read-only view of cluster worker node
 kubectl get resourcequota,limitrange     # your guardrails
 ```
 
+Or run the automated **CKAD Lab Smoke Test & Security Audit** script from the root of the repository to validate your connection, least-privilege guardrails, and live HTTP routing across all CKAD lab modules (Sections 4–10):
+
+```bash
+./scripts/ckad-lab-smoke-test.sh
+```
+
 ### Expose an application (shared Gateway)
 
 The whole workshop shares **one** load balancer. Traefik runs behind it and serves both the **Gateway API** (Gateway `lab-gateway`) and **Ingress** (class `traefik`). You attach your app with a route that uses **your hostname** from the welcome email, for example `jsmith-example-com.amlcoftherockies.net`.

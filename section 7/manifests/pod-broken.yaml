@@ -1,0 +1,41 @@
+# Intentionally broken Deployment + Service for the CKAD Troubleshooting Challenge!
+# There are 3 bugs preventing `broken-svc` from routing traffic to a healthy Pod:
+#   Bug 1: Image tag typo (`nginx:1.25-alpin` -> `ImagePullBackOff`)
+#   Bug 2: Readiness probe checks port 8080, but nginx listens on port 80
+#   Bug 3: Service selector uses `app: wrong-label` instead of `app: debug-app`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debug-app
+  template:
+    metadata:
+      labels:
+        app: debug-app
+    spec:
+      containers:
+      - name: web
+        image: docker.io/library/nginx:1.25-alpin
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          periodSeconds: 3
+          failureThreshold: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken-svc
+spec:
+  selector:
+    app: wrong-label
+  ports:
+  - port: 80
+    targetPort: 80

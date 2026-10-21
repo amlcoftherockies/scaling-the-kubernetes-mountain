@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base
+
+namePrefix: prod-
+
+labels:
+- pairs:
+    environment: prod
+  includeSelectors: true
+
+# Scale up to 3 replicas in production
+replicas:
+- name: storefront
+  count: 3
+
+configMapGenerator:
+- name: storefront-config
+  behavior: merge
+  literals:
+  - LOG_LEVEL="warn"
+  - FEATURE_BANNER="PRODUCTION LIVE"
+
+# Strategic-merge patch to add production resource requests/limits
+patches:
+- path: patch-resources.yaml

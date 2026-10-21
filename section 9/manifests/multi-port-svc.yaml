@@ -1,0 +1,47 @@
+# Pod with two containers listening on two different ports (8080 and 9090),
+# exposed by a single Multi-Port ClusterIP Service on ports 80 and 8081!
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-port-pod
+  labels:
+    app: multi-port-demo
+spec:
+  containers:
+  # Container 1: Main application API on port 8080 (named port: http-api)
+  - name: app-api
+    image: hashicorp/http-echo:1.0
+    args: ["-listen=:8080", "-text=Main Application API (Container Port 8080)"]
+    ports:
+    - name: http-api
+      containerPort: 8080
+  # Container 2: Admin / Diagnostics endpoint on port 9090 (named port: http-admin)
+  - name: admin-diag
+    image: hashicorp/http-echo:1.0
+    args: ["-listen=:9090", "-text=Admin Diagnostics Endpoint (Container Port 9090)"]
+    ports:
+    - name: http-admin
+      containerPort: 9090
+  # Container 3: Debug client (busybox with wget/nslookup)
+  - name: debug-client
+    image: docker.io/library/busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-port-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: multi-port-demo
+  # When a Service exposes >1 port, EVERY port entry MUST have a unique `name`!
+  ports:
+  - name: web
+    protocol: TCP
+    port: 80              # Clients inside the cluster call http://multi-port-svc:80
+    targetPort: http-api  # Forwards to named containerPort 'http-api' (8080)
+  - name: admin
+    protocol: TCP
+    port: 8081            # Clients inside the cluster call http://multi-port-svc:8081
+    targetPort: 9090      # Forwards to numeric containerPort 9090

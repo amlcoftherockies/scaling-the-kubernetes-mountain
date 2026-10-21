@@ -1,0 +1,22 @@
+# Pod with explicit CPU and Memory requests & limits
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-resources-demo
+  labels:
+    app: resources-demo
+spec:
+  containers:
+  - name: app
+    image: docker.io/library/nginx:1.25-alpine
+    ports:
+    - containerPort: 80
+    resources:
+      # Requests: guaranteed minimum reserved by kube-scheduler on the worker node
+      requests:
+        cpu: "100m"      # 0.1 vCPU (100 millicores)
+        memory: "128Mi"  # 128 MiB RAM
+      # Limits: hard ceiling enforced by Linux cgroups on the worker node
+      limits:
+        cpu: "250m"      # Throttled (CFS quota) if it tries to burst above 0.25 vCPU
+        memory: "256Mi"  # Killed (OOMKilled / Exit Code 137) if it exceeds 256 MiB

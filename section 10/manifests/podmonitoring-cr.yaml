@@ -1,0 +1,15 @@
+# Custom Resource (CR) for Google Cloud Managed Service for Prometheus (GMP) Operator!
+# The CRD (`podmonitorings.monitoring.googleapis.com`) is pre-installed on the cluster,
+# and the Operator controller watches every namespace for `kind: PodMonitoring` objects.
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: podinfo-scraper
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: podinfo
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics

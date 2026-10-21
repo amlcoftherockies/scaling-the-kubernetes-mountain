@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prom-app-conf
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location / {
+        return 200 "Order Service OK\n";
+      }
+      # Built-in Nginx stub_status + Prometheus text format endpoint on /metrics
+      location /stub_status {
+        stub_status;
+      }
+      location /metrics {
+        default_type text/plain;
+        return 200 '# HELP http_requests_total Total number of HTTP requests processed\n# TYPE http_requests_total counter\nhttp_requests_total{method="GET",status="200",service="order-api"} 142\nhttp_requests_total{method="POST",status="500",service="order-api"} 3\n# HELP memory_usage_bytes Current memory usage in bytes\n# TYPE memory_usage_bytes gauge\nmemory_usage_bytes{service="order-api"} 52428800\n# HELP http_request_duration_seconds HTTP request latency histogram\n# TYPE http_request_duration_seconds histogram\nhttp_request_duration_seconds_bucket{le="0.05"} 120\nhttp_request_duration_seconds_bucket{le="0.1"} 138\nhttp_request_duration_seconds_bucket{le="0.5"} 145\nhttp_request_duration_seconds_bucket{le="+Inf"} 145\nhttp_request_duration_seconds_sum 6.42\nhttp_request_duration_seconds_count 145\n';
+      }
+    }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: metrics-demo
+  labels:
+    app: metrics-demo
+  # Standard Prometheus scrape annotations used across Kubernetes clusters
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  containers:
+  - name: order-api
+    image: docker.io/library/nginx:1.25-alpine
+    ports:
+    - containerPort: 8080
+      name: http-metrics
+    volumeMounts:
+    - name: conf
+      mountPath: /etc/nginx/conf.d
+  volumes:
+  - name: conf
+    configMap:
+      name: prom-app-conf

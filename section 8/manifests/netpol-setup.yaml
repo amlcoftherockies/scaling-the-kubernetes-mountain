@@ -1,0 +1,52 @@
+# 1. Backend API Pod + ClusterIP Service
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backend-api
+  labels:
+    app: backend-api
+    tier: backend
+spec:
+  containers:
+  - name: api
+    image: hashicorp/http-echo:1.0
+    args: ["-listen=:8080", "-text=CONFIDENTIAL: Backend API Data"]
+    ports:
+    - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+spec:
+  selector:
+    app: backend-api
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+# 2. Authorized Frontend Pod (carries label `role: frontend`)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend-client
+  labels:
+    role: frontend
+spec:
+  containers:
+  - name: client
+    image: docker.io/library/busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+---
+# 3. Unauthorized Intruder Pod (does NOT carry `role: frontend`)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: intruder-client
+  labels:
+    role: untrusted
+spec:
+  containers:
+  - name: client
+    image: docker.io/library/busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]

@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Inherit everything from ../../base
+resources:
+- ../../base
+
+# Prefix all resource names with "dev-"
+namePrefix: dev-
+
+# Add environment label to all resources and selectors
+labels:
+- pairs:
+    environment: dev
+  includeSelectors: true
+
+# Override replica count for dev
+replicas:
+- name: storefront
+  count: 1
+
+# Merge additional keys into the generated ConfigMap
+configMapGenerator:
+- name: storefront-config
+  behavior: merge
+  literals:
+  - LOG_LEVEL="debug"
+  - FEATURE_BANNER="DEV SANDBOX"

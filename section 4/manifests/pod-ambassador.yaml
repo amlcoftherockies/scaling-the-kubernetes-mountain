@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ambassador-nginx-conf
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location / {
+        # The ambassador proxies localhost:8080 -> upstream service (or external API)
+        proxy_pass http://127.0.0.1:9000;
+        add_header X-Ambassador-Proxy "active";
+      }
+    }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-ambassador-demo
+  labels:
+    app: ambassador-demo
+spec:
+  containers:
+  # 1. Main application container (talks only to localhost:8080)
+  - name: app-client
+    image: docker.io/library/busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+  # 2. Ambassador proxy container (listens on localhost:8080 and forwards to port 9000)
+  - name: ambassador-proxy
+    image: docker.io/library/nginx:1.25-alpine
+    ports:
+    - containerPort: 8080
+    volumeMounts:
+    - name: proxy-config
+      mountPath: /etc/nginx/conf.d
+  # 3. Simulated upstream backend on port 9000
+  - name: upstream-service
+    image: hashicorp/http-echo:1.0
+    args: ["-listen=:9000", "-text=Response via Ambassador Proxy!"]
+  volumes:
+  - name: proxy-config
+    configMap:
+      name: ambassador-nginx-conf

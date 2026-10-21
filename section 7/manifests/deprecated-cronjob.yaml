@@ -1,0 +1,18 @@
+# Legacy manifest written for an older Kubernetes release (uses removed v1beta1 API
+# and legacy extensions/v1beta1 Ingress schema).
+# Fix it for modern Kubernetes (batch/v1 CronJob) using `kubectl api-resources` and `kubectl explain`!
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: legacy-audit-cron
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: audit
+            image: docker.io/library/busybox:1.36
+            command: ["sh", "-c", "echo 'Audit complete'"]

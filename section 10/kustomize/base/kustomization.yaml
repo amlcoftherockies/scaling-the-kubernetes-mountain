@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- deployment.yaml
+- service.yaml
+
+labels:
+- pairs:
+    app: storefront
+  includeSelectors: true
+
+# Generates a ConfigMap with a content-hash suffix (so changing values triggers a Deployment rollout!)
+configMapGenerator:
+- name: storefront-config
+  literals:
+  - APP_TITLE="AMLC Mountain Store"
+  - LOG_LEVEL="info"

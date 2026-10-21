@@ -18,24 +18,53 @@ In this guide, we will walk through:
 
 ---
 
-## 📦 Module 1: Building a Reproducible OCI Image (Multi-Stage Builds)
+## 📦 Module 1: Docker & OCI Standards, Multi-Stage Builds, and Image Optimization
 
-When deploying applications to Kubernetes, container size and security are paramount. 
-*   **Large containers** slow down Pod startup times because the node has to download gigabytes of data.
-*   **Containers with compilers/shells** have a larger attack surface: if an attacker compromises your application, they can use built-in tools to compile malware or scan your network.
+When deploying applications to Kubernetes, your cluster nodes do **not** run Docker Desktop—they run a lightweight **OCI-compliant container runtime** such as `containerd` or `CRI-O`. Yet every image you build with `docker build` runs seamlessly on Kubernetes. Why? Because of the **Open Container Initiative (OCI)** standards.
 
-### 1.1 Multi-Stage Builds Theory
-A **Multi-Stage Build** allows you to use multiple temporary `FROM` blocks in your Dockerfile.
-1.  **Stage 1 (Builder)**: Uses a full-featured image containing compilers, package managers, and development tools to build your application binary.
-2.  **Stage 2 (Runner)**: Starts from a completely fresh, minimal base image (like `alpine` or `scratch`) and copies *only* the compiled binary from the builder stage. All compiler dependencies are discarded.
+### 1.1 Understanding Docker and OCI Container Standards
+The **Open Container Initiative (OCI)** (under the Linux Foundation) defines three vendor-neutral specifications that decouple *building* containers from *storing* and *running* them:
+
+```mermaid
+flowchart LR
+    Build["docker buildx build\n(or Podman / Buildah / Kaniko)"] -->|"1. OCI Image Spec\n(Manifest + Config JSON + Tar Layers)"| Reg["Container Registry\n(Docker Hub / ttl.sh / GAR)"]
+    Reg -->|"2. OCI Distribution Spec\n(HTTP/V2 Pull by Tag or SHA256 Digest)"| CRI["Node CRI (containerd / CRI-O)\nUnpacks RootFS + config.json"]
+    CRI -->|"3. OCI Runtime Spec\n(runc or gVisor runsc)"| Kernel["Linux Container\n(cgroups + namespaces)"]
+```
+
+1.  **OCI Image Specification**: Defines what a container image actually is on disk—not a single monolithic VM file, but a **JSON Manifest** pointing to an **Image Configuration JSON** (`Architecture`, `Env`, `Cmd`, `User`) and an ordered stack of **read-only `.tar.gz` filesystem layers** addressed by their `sha256:` content hash.
+2.  **OCI Distribution Specification**: Standardizes the HTTP API (`/v2/...`) for pushing and pulling image layers and manifests between any client (`docker`, `crane`, `containerd`) and any registry (Docker Hub, `ttl.sh`, Google Artifact Registry, GHCR).
+3.  **OCI Runtime Specification**: Defines how a low-level runtime (`runc` by default, or `runsc` for gVisor in Module 4) takes an unpacked filesystem bundle + `config.json` and asks the Linux kernel to spawn an isolated process.
 
 ---
 
-### 1.2 Reviewing the Application
-We will use a simple web application written in Go. Go is ideal because it compiles to a single, static executable binary.
+### 1.2 Creating & Optimizing Docker Images (Multi-Stage Builds)
+When building images for Kubernetes, **size, layer caching, and security** directly impact production reliability:
+*   **Large images** slow down Pod autoscaling and rollouts because nodes must download gigabytes over the network on every cache miss.
+*   **Images containing compilers, package managers (`apk`/`apt`), or shells** expand the attack surface if a container is compromised.
+*   **Running as `root` (UID 0)** violates Kubernetes `restricted` Pod Security Standards.
 
-1.  Review the application source code in [main.go](app/main.go).
-2.  Review the multi-stage [Dockerfile](app/Dockerfile):
+#### 5 Core Image Optimization Rules for CKAD:
+1.  **Use Multi-Stage Builds**:
+    *   **Stage 1 (`builder`)**: Uses a full SDK image (`golang:1.22-alpine`, ~800 MB) with compilers and build tools to compile your code.
+    *   **Stage 2 (runtime)**: Starts from a minimal base (`alpine:3.19` at ~7 MB, or `gcr.io/distroless/static:nonroot` / `scratch` at ~0–2 MB) and copies **only** the compiled artifact (`COPY --from=builder`). All compilers and source code are discarded!
+2.  **Order Layers from Least-Frequently Changed to Most-Frequently Changed**:
+    *   Docker caches each instruction (`FROM`, `RUN`, `COPY`) as an immutable OCI layer. If a layer changes, **every layer after it is invalidated and rebuilt**.
+    *   Always copy dependency manifests (`package.json`, `go.mod`, `requirements.txt`) and install dependencies *before* copying application source code (`COPY . .`).
+3.  **Always Add a [`.dockerignore`](app/.dockerignore) File**:
+    *   Prevents `.git/`, local secrets, markdown docs, or local build artifacts from being sent into the Docker build context or accidentally baked into an image layer.
+4.  **Strip Debug Symbols & Combine `RUN` Cleanup**:
+    *   In Go, `-ldflags="-w -s"` strips DWARF debug tables (shrinking the binary by ~30%). When installing OS packages in a `RUN` step, clean the package cache in the **same** `RUN` layer (e.g., `apk add --no-cache ...` or `apt-get update && apt-get install -y ... && rm -rf /var/lib/apt/lists/*`), because deleting files in a *later* `RUN` layer does not shrink earlier layers!
+5.  **Run as a Non-Root Numeric UID (`USER 65532:65532`)**:
+    *   Using a numeric UID (instead of a username string like `USER appuser`) allows Kubernetes `securityContext.runAsNonRoot: true` to verify the container is non-root without needing to parse `/etc/passwd`.
+
+---
+
+### 1.3 Reviewing the Application, `.dockerignore`, and `Dockerfile`
+We will build a Go web application. Go compiles to a single static executable binary, making it ideal for multi-stage builds.
+
+1.  Review the application source code in [main.go](app/main.go) and the context exclusions in [.dockerignore](app/.dockerignore).
+2.  Review the optimized multi-stage [Dockerfile](app/Dockerfile):
 
 ```dockerfile
 # --- Stage 1: Build the static Go binary ---
@@ -44,26 +73,28 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /build
 COPY main.go .
-# Compile the binary as fully static (disable CGO) for the target OS/CPU
+# Compile the binary as fully static (disable CGO) and strip debug symbols (-w -s)
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags="-w -s" -o app main.go
 
 # --- Stage 2: Deploy the binary in a minimal runtime environment ---
 FROM alpine:3.19
+RUN adduser -D -u 65532 appuser
 WORKDIR /app
 COPY --from=builder /build/app .
+USER 65532:65532
 EXPOSE 8080
 CMD ["./app"]
 ```
 
 > [!TIP]
-> The compile command uses `CGO_ENABLED=0`. This tells Go to build a completely self-contained binary with no dynamic linking to C libraries (such as `glibc`), allowing the binary to run on any base filesystem—even inside the empty `scratch` image!
+> The compile command uses `CGO_ENABLED=0`. This tells Go to build a completely self-contained binary with no dynamic linking to C libraries (`glibc`/`musl`), allowing the binary to run on any minimal filesystem—even an empty `FROM scratch` image!
 
 > [!TIP]
-> `--platform=$BUILDPLATFORM` plus `GOARCH=${TARGETARCH}` is the standard **cross-compile** pattern. The Go compiler runs natively on your laptop's CPU and emits a binary for whichever CPU you ask Docker to target — no slow emulation.
+> `--platform=$BUILDPLATFORM` plus `GOARCH=${TARGETARCH}` is the standard **cross-compile** pattern. The Go compiler runs natively on your laptop's CPU and emits a binary for whichever CPU you ask Docker to target — no slow QEMU emulation.
 
 ---
 
-### 1.3 Building the Image Locally
+### 1.4 Building and Inspecting the OCI Image Locally
 Workshop worker nodes are **x86_64** (GKE `e2`, OKE `E5`). An image only runs on the CPU architecture it was built for, so always build for `linux/amd64`:
 
 ```bash
@@ -71,12 +102,17 @@ cd "section 6/app"
 docker buildx build --platform linux/amd64 -t ckad-app:1.0 --load .
 ```
 
-*Verify the image size and architecture:*
+**Inspect the resulting OCI image size, layers, and metadata:**
 ```bash
+# 1. Check total image size (~12 MB vs ~800 MB for the builder stage!)
 docker images ckad-app:1.0
-docker image inspect ckad-app:1.0 --format '{{.Architecture}}'   # amd64
+
+# 2. Inspect the OCI layers that make up the final runtime stage
+docker history ckad-app:1.0
+
+# 3. Inspect the OCI Image Config JSON (Architecture, non-root User, and RootFS layer SHA256 digests)
+docker image inspect ckad-app:1.0 --format 'Arch={{.Architecture}} User={{.Config.User}} Layers={{json .RootFS.Layers}}'
 ```
-*Note that the final image is only around **15MB**, whereas the builder stage (`golang:alpine`) was over **800MB**!*
 
 > [!WARNING]
 > **Apple Silicon (M1/M2/M3/M4) Macs** build `arm64` images by default. Without `--platform linux/amd64`, the Pod crashes immediately with **`exec format error`** in `kubectl logs`. Intel/AMD laptops build `amd64` already, but use the flag anyway so the command works for everyone.

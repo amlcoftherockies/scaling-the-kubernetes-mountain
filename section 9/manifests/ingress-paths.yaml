@@ -1,0 +1,26 @@
+# Standard Kubernetes Ingress (networking.k8s.io/v1)
+# Replace MY_HOST with <your-namespace>.amlcoftherockies.net
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: MY_HOST
+    http:
+      paths:
+      - path: /v1
+        pathType: Prefix
+        backend:
+          service:
+            name: v1-svc
+            port:
+              number: 80
+      - path: /v2
+        pathType: Prefix
+        backend:
+          service:
+            name: v2-svc
+            port:
+              number: 80

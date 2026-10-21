@@ -80,10 +80,19 @@ kubectl get pod nginx-single -o yaml
 *   **Desired State**: Defined in the **`spec`** block. This is the blueprint you submitted.
 *   **Deployed (Actual) State**: Stored in the **`status`** block. It contains dynamic information like `podIP`, `phase: Running`, container statuses, start times, and node placement.
 
-#### 1.2.4 Multi-Container Pods (Shared Network & Storage)
-Containers inside a single Pod share the same network namespace (they share the same IP address and can talk to each other via `localhost`) and can share volumes.
+#### 1.2.4 Multi-Container Pod Patterns (Sidecar, Init Containers, Ambassador)
+Containers inside a single Pod share the **same network namespace** (they share the same IP address and can talk to each other via `localhost`) and can **share volumes** (`emptyDir`, `PersistentVolumeClaim`, `ConfigMap`).
 
-Review [pod-multi.yaml](manifests/pod-multi.yaml). It defines a web-server container and a sidecar container that generates content and writes it to a shared `emptyDir` volume.
+The CKAD exam tests three core multi-container Pod patterns:
+
+| Pattern | How it works | Common Use Cases |
+| :--- | :--- | :--- |
+| **1. Sidecar** | A helper container runs *alongside* the main container for the lifetime of the Pod, sharing a volume or network. | Log shippers (Fluent Bit), file/content syncers, service mesh proxies (Envoy). *(Note: Kubernetes 1.29+ also supports native sidecars via `initContainers` with `restartPolicy: Always`.)* |
+| **2. Init Container** | Defined under `spec.initContainers`. Runs **to completion sequentially** *before* any application container in `spec.containers` starts. | Waiting for a database/service to be reachable, running DB schema migrations, seeding config or HTML files into a shared `emptyDir`. |
+| **3. Ambassador** | A proxy container that listens on `localhost` inside the Pod and forwards outbound requests from the main app to external services. | TLS termination, routing to different dev/prod shards, adding auth headers or retries without changing the app code. |
+
+##### Pattern A: The Sidecar Pattern ([pod-multi.yaml](manifests/pod-multi.yaml))
+Review [pod-multi.yaml](manifests/pod-multi.yaml). It defines a `web-server` (`nginx`) container and a `content-generator` sidecar container that continuously writes timestamps to a shared `emptyDir` volume.
 
 Deploy the multi-container pod:
 ```bash
@@ -93,12 +102,46 @@ Verify that both containers in the pod are ready (`READY 2/2`):
 ```bash
 kubectl get pods
 ```
-Verify they share storage. SSH/exec into the `web-server` container to check if it serves the file written by the `content-generator` container:
+Verify they share storage. Exec into the `web-server` container to check if it serves the file written by the `content-generator` sidecar:
 ```bash
-kubectl exec nginx-multi -c web-server -- wget -O- http://localhost:80
+kubectl exec nginx-multi -c web-server -- wget -qO- http://localhost:80
 ```
 *You should see output similar to:*
-`Hello from the Sidecar Container! Time: Tue May 26 15:35:10 UTC 2026`
+`Hello from the Sidecar Container! Time: Tue Oct 20 19:35:10 UTC 2026`
+
+##### Pattern B: Init Containers ([pod-init.yaml](manifests/pod-init.yaml))
+If an Init Container fails, Kubernetes restarts it until it succeeds (unless `restartPolicy: Never`). If a Pod has multiple `initContainers`, they run **one at a time in order**, and the main app container only starts after every Init Container exits `0`.
+
+Review and apply [pod-init.yaml](manifests/pod-init.yaml):
+```bash
+kubectl apply -f manifests/pod-init.yaml
+kubectl get pod pod-init-demo
+```
+*If you catch it within the first 2 seconds, `STATUS` shows `Init:0/1` -> `PodInitializing` -> `Running`.*
+
+Wait for it to become Ready and verify that the `seed-html` init container populated `/usr/share/nginx/html/index.html` before exiting:
+```bash
+kubectl wait --for=condition=Ready pod/pod-init-demo --timeout=60s
+kubectl exec pod-init-demo -c web-server -- wget -qO- http://localhost:80
+kubectl logs pod-init-demo -c seed-html
+```
+*You will see `<h1>Initialized by Init Container at ...</h1>` and the init container's completion log!*
+
+##### Pattern C: The Ambassador Pattern ([pod-ambassador.yaml](manifests/pod-ambassador.yaml))
+In the Ambassador pattern, the main application is hardcoded to talk to `localhost:8080`. It has no idea where the real upstream service lives or how it's configured—an **ambassador proxy container** inside the same Pod listens on `localhost:8080`, injects headers/TLS, and forwards traffic to the upstream backend.
+
+Review and apply [pod-ambassador.yaml](manifests/pod-ambassador.yaml):
+```bash
+kubectl apply -f manifests/pod-ambassador.yaml
+kubectl wait --for=condition=Ready pod/pod-ambassador-demo --timeout=60s
+```
+Exec into the `app-client` container and make a request to **`localhost:8080`** (with `-S` to inspect response headers):
+```bash
+kubectl exec pod-ambassador-demo -c app-client -- wget -qSO- http://localhost:8080
+```
+*Notice two things in the output:*
+1. The body returns `Response via Ambassador Proxy!` (from the upstream service on port `9000`).
+2. The response headers include `X-Ambassador-Proxy: active`, injected transparently by the `ambassador-proxy` container over the Pod's shared `localhost` loopback interface!
 
 ---
 
@@ -352,31 +395,112 @@ Let's break one of the pods to watch self-healing in action:
 
 ---
 
-### 2.4 Automated Rollouts (Rolling Updates)
+### 2.4 Automated Rollouts (Rolling Updates & Rollback Strategies)
 
-When you modify the Pod Template spec of a Deployment (such as updating an image version), the Deployment controller triggers a **Rolling Update**. It replaces old pods with new pods at a controlled rate, ensuring zero downtime.
+When you modify the Pod Template spec of a Deployment (such as updating an image version), the Deployment controller creates a **new ReplicaSet** and scales it up while scaling the old ReplicaSet down.
 
+#### Update Strategy Types (`spec.strategy.type`):
+*   **`RollingUpdate` (Default)**: Replaces Pods gradually for **zero downtime**. Controlled by two parameters under `spec.strategy.rollingUpdate`:
+    *   **`maxSurge`** (default `25%`): Maximum number (or `%`) of extra Pods that can be created *above* the desired replica count during an update.
+    *   **`maxUnavailable`** (default `25%`): Maximum number (or `%`) of Pods that can be unavailable during the update.
+*   **`Recreate`**: Terminates **all** existing Pods before creating any new Pods. Causes brief downtime, but is used when old and new versions cannot run side-by-side (e.g., exclusive database locks).
+
+#### Hands-On: Rolling Update & Rollback
 1.  **Declaratively Trigger a Rollout**:
-    Open [deployment.yaml](manifests/deployment.yaml) in your editor and update the container image from `nginx:1.25-alpine` to `nginx:1.26-alpine`. Apply the update:
+    Open [deployment.yaml](manifests/deployment.yaml) in your editor and update the container image from `nginx:1.25-alpine` to `nginx:1.26-alpine` (or run `kubectl set image deployment/nginx-deployment nginx=docker.io/library/nginx:1.26-alpine`). Apply the update:
     ```bash
     kubectl apply -f manifests/deployment.yaml
     ```
-2.  **Monitor the Rollout Status**:
+2.  **Monitor the Rollout Status & ReplicaSets**:
     ```bash
     kubectl rollout status deployment/nginx-deployment
+    kubectl get replicasets -l app=deploy-web
     ```
-    *(Observe that new pods are created and initialized before old ones are terminated).*
+    *(Notice there are now **two** ReplicaSets: the old one at `DESIRED 0`—kept for instant rollback—and the new one at `DESIRED 3`!)*
 
 3.  **Inspect Rollout History**:
     ```bash
     kubectl rollout history deployment/nginx-deployment
     ```
 4.  **Perform an Undo (Rollback)**:
-    If a rollout goes wrong, you can undo it immediately:
+    If a rollout goes wrong, you can roll back to the previous revision (or pass `--to-revision=1` for a specific revision):
     ```bash
     kubectl rollout undo deployment/nginx-deployment
+    kubectl rollout status deployment/nginx-deployment
     ```
-    *Verify the rollout status to watch it roll back to the previous image version.*
+
+---
+
+### 2.5 DaemonSets for Node-Level Utilities
+
+While a **Deployment** distributes N replicas across the cluster based on available CPU/memory, a **DaemonSet** guarantees that **exactly one copy of a Pod runs on every eligible worker node** in the cluster.
+*   When a new worker node joins the cluster (e.g., via Cluster Autoscaler), the DaemonSet controller automatically places a Pod on it.
+*   **Common Use Cases**: Node log collectors (Fluent Bit, Vector), node monitoring agents (Prometheus Node Exporter, Datadog Agent), CNI networking plugins (Cilium, Calico), and CSI storage node drivers.
+
+> *(Note: For **stateful** applications that require sticky network identities `web-0`, `web-1` and dedicated per-Pod persistent disks, Kubernetes provides **StatefulSets**—which you will build hands-on in [Section 5, Module 4](../section%205/README.md#4-module-4-statefulsets)!)*
+
+#### Hands-On: Deploying a Node Utility DaemonSet
+1.  Review and apply [daemonset.yaml](manifests/daemonset.yaml):
+    ```bash
+    kubectl apply -f manifests/daemonset.yaml
+    ```
+2.  Inspect the DaemonSet status:
+    ```bash
+    kubectl get daemonset node-log-agent
+    ```
+    *Notice `DESIRED`, `CURRENT`, and `READY` automatically match the number of standard worker nodes in the cluster (you never specify `replicas:` in a DaemonSet!).*
+3.  Verify that each Pod was placed on a **different** worker node:
+    ```bash
+    kubectl get pods -l app=node-log-agent -o wide
+    ```
+    *Look at the `NODE` column—each worker node has its own dedicated `node-log-agent` Pod!*
+4.  Clean up the DaemonSet before moving to the next step so you keep plenty of namespace quota free:
+    ```bash
+    kubectl delete -f manifests/daemonset.yaml
+    ```
+
+---
+
+### 2.6 Batch & Scheduled Workloads (`Job` & `CronJob`)
+
+While `Deployment`, `StatefulSet`, and `DaemonSet` run **long-lived services** (`restartPolicy: Always`), batch tasks (report generation, database migrations, ML training, nightly backups) are meant to **run to completion (`exit 0`) and stop**.
+
+| Controller | Purpose | Key Spec Fields (CKAD Essentials) |
+| :--- | :--- | :--- |
+| **`Job`** (`batch/v1`) | Runs one or more Pods to successful completion (`exit 0`). | • `completions`: Total successful runs needed.<br>• `parallelism`: Max Pods running at the same time.<br>• `backoffLimit`: Max retries before marking Job Failed.<br>• `activeDeadlineSeconds`: Max runtime before timeout.<br>• `restartPolicy`: Must be `OnFailure` or `Never` (**never** `Always`). |
+| **`CronJob`** (`batch/v1`) | Creates a `Job` on a repeating 5-field cron schedule (`min hour day month weekday`). | • `schedule`: e.g. `"*/5 * * * *"` (every 5 minutes).<br>• `concurrencyPolicy`: `Allow`, `Forbid` (skip if still running), or `Replace`.<br>• `successfulJobsHistoryLimit` / `failedJobsHistoryLimit`. |
+
+#### Hands-On: Running a Parallel `Job` and a `CronJob`
+1.  **CKAD Imperative Shortcut (`--dry-run=client`):**
+    You can generate a `Job` or `CronJob` YAML skeleton in 2 seconds:
+    ```bash
+    kubectl create job my-job --image=busybox:1.36 --dry-run=client -o yaml -- echo "Done"
+    kubectl create cronjob my-cron --image=busybox:1.36 --schedule="*/5 * * * *" --dry-run=client -o yaml -- date
+    ```
+2.  **Deploy a Parallel Batch `Job` ([manifests/job.yaml](manifests/job.yaml)):**
+    Review [manifests/job.yaml](manifests/job.yaml)—it requires `completions: 4` running `parallelism: 2` Pods at a time:
+    ```bash
+    kubectl apply -f manifests/job.yaml
+    kubectl wait --for=condition=complete job/batch-report-job --timeout=60s
+    kubectl get job batch-report-job
+    kubectl get pods -l job-name=batch-report-job
+    ```
+    *Notice `COMPLETIONS` reaches `4/4` and all 4 Pods sit in `STATUS: Completed` so you can still inspect their logs (`kubectl logs job/batch-report-job`)!*
+3.  **Deploy a `CronJob` ([manifests/cronjob.yaml](manifests/cronjob.yaml)) & Trigger an Immediate Run:**
+    ```bash
+    kubectl apply -f manifests/cronjob.yaml
+    kubectl get cronjob nightly-cleanup-cron
+
+    # Pro-Tip (CKAD favorite!): Manually trigger a one-off Job from a CronJob without waiting for the timer!
+    kubectl create job manual-cleanup --from=cronjob/nightly-cleanup-cron
+    kubectl wait --for=condition=complete job/manual-cleanup --timeout=60s
+    kubectl logs job/manual-cleanup
+    ```
+4.  **Clean up the batch workloads:**
+    ```bash
+    kubectl delete job manual-cleanup --ignore-not-found
+    kubectl delete -f manifests/job.yaml -f manifests/cronjob.yaml
+    ```
 
 ---
 
@@ -552,12 +676,87 @@ kubectl port-forward svc/nginx-clusterip 8080:80
 
 ---
 
+### 3.5 Advanced Deployment Strategies: Blue-Green & Canary
+
+Because Kubernetes **Services** route traffic to Pods dynamically using **label selectors**, you can implement **Blue-Green** and **Canary** releases natively using standard Deployments and Services (often tested on the CKAD exam!).
+
+```mermaid
+flowchart TD
+    subgraph BG["Blue-Green Strategy (Instant Cutover)"]
+        SVC_BG["Service: bg-service\nselector: app=bg-demo, version=green"]
+        BLUE["Deployment: web-blue\n(version=blue, 2 pods)"]
+        GREEN["Deployment: web-green\n(version=green, 2 pods)"]
+        SVC_BG -. "0% (standby for instant rollback)" .-> BLUE
+        SVC_BG ==>|"100% traffic"| GREEN
+    end
+
+    subgraph CAN["Canary Strategy (Proportional Traffic Split)"]
+        SVC_CAN["Service: canary-service\nselector: app=canary-demo"]
+        STABLE["Deployment: web-stable\n(track=stable, 3 pods)"]
+        CANARY["Deployment: web-canary\n(track=canary, 1 pod)"]
+        SVC_CAN ==>|"~75% (3/4 endpoints)"| STABLE
+        SVC_CAN -->|"~25% (1/4 endpoints)"| CANARY
+    end
+```
+
+#### Strategy A: Blue-Green Deployment ([blue-green.yaml](manifests/blue-green.yaml))
+In a **Blue-Green** release, you run two full environments side-by-side: **Blue** (`v1.0`, currently serving live traffic) and **Green** (`v2.0`, staged and verified). Once Green is ready, you flip the Service's label selector from `version: blue` to `version: green` for an **instant, zero-downtime cutover**.
+
+1.  Deploy [blue-green.yaml](manifests/blue-green.yaml) and wait for both Deployments to become Ready:
+    ```bash
+    kubectl apply -f manifests/blue-green.yaml
+    kubectl rollout status deployment/web-blue deployment/web-green
+    ```
+2.  Verify that `bg-service` currently routes 100% of traffic to **Blue**:
+    ```bash
+    kubectl exec tmp-client -- wget -qO- http://bg-service
+    ```
+    *Output:* `BLUE environment (v1.0)`
+3.  **Cut over to Green**: Patch the Service selector to `version: green`:
+    ```bash
+    kubectl patch svc bg-service -p '{"spec":{"selector":{"version":"green"}}}'
+    ```
+4.  Test `bg-service` again—traffic immediately hits **Green** with zero downtime:
+    ```bash
+    kubectl exec tmp-client -- wget -qO- http://bg-service
+    ```
+    *Output:* `GREEN environment (v2.0)`
+    *(And if Green had a bug, switching the selector back to `blue` rolls back in milliseconds!)*
+5.  Clean up the Blue-Green resources before starting the Canary test:
+    ```bash
+    kubectl delete -f manifests/blue-green.yaml
+    ```
+
+#### Strategy B: Canary Deployment ([canary.yaml](manifests/canary.yaml))
+In a **Canary** release, you expose a small percentage of live requests to the new version before rolling it out to everyone.
+*   `canary-service` selects **only** `app: canary-demo` (it intentionally omits the `track` label!).
+*   `web-stable` runs **3 replicas** (`app: canary-demo, track: stable`).
+*   `web-canary` runs **1 replica** (`app: canary-demo, track: canary`).
+*   Because the Service load-balances evenly across all 4 matching Pod endpoints, **75% (3/4)** of requests hit `stable` and **25% (1/4)** hit `canary`!
+
+1.  Deploy [canary.yaml](manifests/canary.yaml) and wait for both Deployments:
+    ```bash
+    kubectl apply -f manifests/canary.yaml
+    kubectl rollout status deployment/web-stable deployment/web-canary
+    ```
+2.  Send 8 requests to `canary-service` from `tmp-client` and observe the traffic split:
+    ```bash
+    kubectl exec tmp-client -- sh -c 'for i in 1 2 3 4 5 6 7 8; do wget -qO- http://canary-service; done'
+    ```
+    *You will see roughly 6 responses from `STABLE release (v1.0)` and 2 responses from `CANARY release (v2.0)`!*
+3.  **Promote the Canary**: Once you're confident in `v2.0`, scale `web-canary` up (or update `web-stable` to `v2.0` and scale `web-canary` to `0`). Clean up when finished:
+    ```bash
+    kubectl delete -f manifests/canary.yaml
+    ```
+
+---
+
 ## 🧹 Cleaning Up
 
 After finishing this section, clean up all practice resources:
 ```bash
-kubectl delete -f manifests/
-kubectl delete pod tmp-client nginx-imperative
-kubectl delete svc nginx-imperative-svc
-kubectl delete namespace practice-ns   # own cluster only (on the shared cluster you never created it)
+kubectl delete -f manifests/ --ignore-not-found
+kubectl delete pod tmp-client nginx-imperative --ignore-not-found
+kubectl delete svc nginx-imperative-svc --ignore-not-found
+kubectl delete namespace practice-ns --ignore-not-found   # own cluster only
 ```
