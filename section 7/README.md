@@ -270,76 +270,122 @@ Apply [manifests/pod-broken.yaml](manifests/pod-broken.yaml):
 ```bash
 kubectl apply -f manifests/pod-broken.yaml
 ```
-There are **3 distinct bugs** preventing `broken-svc` from serving traffic. Let's find and fix all 3!
+There are **3 distinct bugs** preventing `broken-svc` from serving traffic. Using the 4-step workflow above (`kubectl get pods`, `kubectl describe pod`, `kubectl logs`, and `kubectl get svc,ep`), try to diagnose and fix all 3 on your own!
+
+If you get stuck on any of the bugs, click the hints and solutions below to reveal them:
 
 ---
 
-### 5.2 Bug #1: Diagnose `ErrImagePull` / `ImagePullBackOff`
-1.  Check the Pod status:
-    ```bash
-    kubectl get pods -l app=debug-app
-    ```
-    *Status shows `ErrImagePull` or `ImagePullBackOff`.*
-2.  Inspect the Pod events to see why the image pull failed:
-    ```bash
-    kubectl describe pod -l app=debug-app | tail -n 15
-    ```
-    *Look at the `Events:` section:* `Failed to pull image "docker.io/library/nginx:1.25-alpin": ... not found`.
-3.  **Fix Bug #1**: Update the image tag to `docker.io/library/nginx:1.25-alpine`:
-    ```bash
-    kubectl set image deployment/broken-app web=docker.io/library/nginx:1.25-alpine
-    ```
+### 5.2 Bug #1: Pod Not Starting
+
+<details>
+<summary><b>💡 Hint for Bug #1 (Click to expand)</b></summary>
+
+1. Check the Pod status:
+   ```bash
+   kubectl get pods -l app=debug-app
+   ```
+2. Why is the status `ErrImagePull` or `ImagePullBackOff`? Inspect the `Events:` section at the bottom of `kubectl describe pod -l app=debug-app`.
+
+</details>
+
+<details>
+<summary><b>✅ Solution for Bug #1 (Click to reveal answer)</b></summary>
+
+1. Inspect the Pod events to see why the image pull failed:
+   ```bash
+   kubectl describe pod -l app=debug-app | tail -n 15
+   ```
+   *Look at the `Events:` section:* `Failed to pull image "docker.io/library/nginx:1.25-alpin": ... not found` (a typo in `1.25-alpine`).
+2. **Fix Bug #1**: Update the image tag to `docker.io/library/nginx:1.25-alpine`:
+   ```bash
+   kubectl set image deployment/broken-app web=docker.io/library/nginx:1.25-alpine
+   ```
+
+</details>
 
 ---
 
-### 5.3 Bug #2: Diagnose `Running` Pod Stuck at `READY 0/1`
-1.  Wait a few seconds and check the Pod again:
-    ```bash
-    kubectl get pods -l app=debug-app
-    ```
-    *The new Pod is `Running`, but `READY` stays stuck at `0/1`!*
-2.  Describe the Pod to see why it isn't becoming Ready:
-    ```bash
-    kubectl describe pod -l app=debug-app | tail -n 15
-    ```
-    *Look at the `Events:` section:*
-    `Readiness probe failed: Get "http://10.20.x.x:8080/": dial tcp 10.20.x.x:8080: connect: connection refused`
-    *Aha! Nginx listens on port **`80`**, but the `readinessProbe` is checking port **`8080`**!*
-3.  **Fix Bug #2**: Patch the Deployment's `readinessProbe` port from `8080` to `80`:
-    ```bash
-    kubectl patch deployment broken-app --type='json' \
-      -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/httpGet/port", "value": 80}]'
-    kubectl rollout status deployment/broken-app
-    ```
-    *Verify the Pod now shows `READY 1/1`!*
+### 5.3 Bug #2: Pod is `Running`, but Stuck at `READY 0/1`
+
+<details>
+<summary><b>💡 Hint for Bug #2 (Click to expand)</b></summary>
+
+1. Wait a few seconds after fixing Bug #1 and check the Pod status:
+   ```bash
+   kubectl get pods -l app=debug-app
+   ```
+2. The container is `Running`, yet `READY` stays `0/1`. Run `kubectl describe pod -l app=debug-app` and check which port the `Readiness` probe is trying to connect to versus which port Nginx actually listens on!
+
+</details>
+
+<details>
+<summary><b>✅ Solution for Bug #2 (Click to reveal answer)</b></summary>
+
+1. Describe the Pod to see why it isn't becoming Ready:
+   ```bash
+   kubectl describe pod -l app=debug-app | tail -n 15
+   ```
+   *Look at the `Events:` section:*
+   `Readiness probe failed: Get "http://10.20.x.x:8080/": dial tcp 10.20.x.x:8080: connect: connection refused`
+   *Aha! Nginx listens on port **`80`**, but the `readinessProbe` is checking port **`8080`**!*
+2. **Fix Bug #2**: Patch the Deployment's `readinessProbe` port from `8080` to `80` (or use `kubectl edit deployment broken-app`):
+   ```bash
+   kubectl patch deployment broken-app --type='json' \
+     -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/httpGet/port", "value": 80}]'
+   kubectl rollout status deployment/broken-app
+   ```
+   *Verify the Pod now shows `READY 1/1`!*
+
+</details>
 
 ---
 
-### 5.4 Bug #3: Diagnose Service Routing Failure (Empty Endpoints)
-1.  The Pod is `1/1 Running`, so let's test calling `broken-svc` from `probes-demo`:
-    ```bash
-    kubectl exec probes-demo -- wget -qO- --timeout=3 http://broken-svc
-    ```
-    *It fails with `can't connect to remote host: Connection refused`!*
-2.  Whenever a Service fails to reach a `1/1 Ready` Pod, immediately check **`Endpoints`** and compare the Service's `Selector` against the Pod's `Labels`:
-    ```bash
-    kubectl get endpoints broken-svc
-    kubectl describe svc broken-svc | grep Selector
-    kubectl get pods -l app=debug-app --show-labels
-    ```
-    *Look at that:*
-    * `broken-svc` has `Selector: app=wrong-label` and `Endpoints: <none>`.
-    * The Pod's actual label is `app=debug-app`!
-3.  **Fix Bug #3**: Patch `broken-svc` so its selector matches `app: debug-app`:
-    ```bash
-    kubectl patch svc broken-svc -p '{"spec":{"selector":{"app":"debug-app"}}}'
-    kubectl get endpoints broken-svc
-    ```
-4.  **Verify the fix end-to-end:**
-    ```bash
-    kubectl exec probes-demo -- wget -qO- http://broken-svc | head -n 5
-    ```
-    *You get `<!DOCTYPE html> ... Welcome to nginx!` — all 3 bugs are resolved!*
+### 5.4 Bug #3: Pod is `1/1 Running`, but `http://broken-svc` Still Fails!
+
+Test calling `broken-svc` from `probes-demo` (or a temporary busybox pod):
+```bash
+kubectl exec probes-demo -- wget -qO- --timeout=3 http://broken-svc
+```
+*It still fails with `can't connect to remote host: Connection refused`!*
+
+<details>
+<summary><b>💡 Hint for Bug #3 (Click to expand)</b></summary>
+
+Whenever a Pod is `1/1 Ready` but its Service refuses connections, check Step 4 of our workflow:
+```bash
+kubectl get endpoints broken-svc
+kubectl describe svc broken-svc
+kubectl get pods -l app=debug-app --show-labels
+```
+Do the Service's `Selector` labels match the Pod's `Labels`?
+
+</details>
+
+<details>
+<summary><b>✅ Solution for Bug #3 (Click to reveal answer)</b></summary>
+
+1. Compare the Service's `Selector` against the Pod's `Labels`:
+   ```bash
+   kubectl get endpoints broken-svc
+   kubectl describe svc broken-svc | grep Selector
+   kubectl get pods -l app=debug-app --show-labels
+   ```
+   *Look at that:*
+   * `broken-svc` has `Selector: app=wrong-label` and `Endpoints: <none>`.
+   * The Pod's actual label is `app=debug-app`!
+2. **Fix Bug #3**: Patch `broken-svc` so its selector matches `app: debug-app`:
+   ```bash
+   kubectl patch svc broken-svc -p '{"spec":{"selector":{"app":"debug-app"}}}'
+   kubectl get endpoints broken-svc
+   ```
+3. **Verify the fix end-to-end:**
+   ```bash
+   kubectl exec probes-demo -- wget -qO- http://broken-svc | head -n 5
+   ```
+   *You get `<!DOCTYPE html> ... Welcome to nginx!` — all 3 bugs are resolved!*
+
+</details>
 
 ---
 
