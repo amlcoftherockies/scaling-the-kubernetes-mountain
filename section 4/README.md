@@ -41,7 +41,7 @@ Look at the **`CONTAINER-RUNTIME`** column. Depending on your cluster you will s
 
 ### 1.2 Pod Fundamentals
 
-#### 1.2.1 The Imperative Way (Fast Deployment)
+#### 1.2.1 The Imperative Way (Fast Deployment & Dry-Run YAML Generation)
 Generate and deploy a single Nginx pod instantly:
 ```bash
 kubectl run nginx-imperative --image=docker.io/library/nginx:1.25-alpine
@@ -51,7 +51,41 @@ kubectl run nginx-imperative --image=docker.io/library/nginx:1.25-alpine
 kubectl get pods
 ```
 
-#### 1.2.2 The Declarative Way (YAML Configuration)
+##### 💡 CKAD Exam Superpower: Imperative `--dry-run=client -o yaml` to a File
+On the CKAD exam (and in day-to-day workflows), you should almost **never write a YAML manifest from scratch**. Instead, use an imperative `kubectl run` (or `kubectl create`) command with `--dry-run=client -o yaml` and redirect (`>`) the output into a file so you can edit and apply it!
+
+1.  **Generate a Pod manifest without creating it on the cluster yet:**
+    ```bash
+    kubectl run nginx-custom --image=docker.io/library/nginx:1.25-alpine --port=80 --dry-run=client -o yaml > my-nginx.yaml
+    cat my-nginx.yaml
+    ```
+2.  **Apply your generated manifest and check its running image version:**
+    ```bash
+    kubectl apply -f my-nginx.yaml
+    kubectl get pod nginx-custom -o jsonpath='{.spec.containers[0].image}{"\n"}'
+    ```
+    *Output:* `docker.io/library/nginx:1.25-alpine`
+3.  **Edit the manifest to upgrade the container image and watch it roll out live:**
+    Open `my-nginx.yaml` in your editor (or use `sed` below) to change `nginx:1.25-alpine` to `nginx:1.26-alpine`:
+    ```bash
+    sed -i.bak 's/nginx:1.25-alpine/nginx:1.26-alpine/' my-nginx.yaml
+    ```
+    Now apply the updated manifest and watch (`-w`) Kubernetes pull the new `1.26-alpine` image and restart the container in-place:
+    ```bash
+    kubectl apply -f my-nginx.yaml
+    kubectl get pod nginx-custom -w
+    ```
+    *(Press `Ctrl+C` once `STATUS` is `Running`.)*
+4.  **Inspect the live cluster manifest (`-o yaml` / `describe`) to see the updated image and event history:**
+    ```bash
+    # Verify the live Pod manifest in the API server now reflects nginx:1.26-alpine (and RESTARTS incremented to 1!):
+    kubectl get pod nginx-custom -o yaml | grep -E "image:|imageID:|restartCount:"
+    kubectl describe pod nginx-custom | tail -n 12
+    ```
+    *Notice in the `Events:` table at the bottom of `kubectl describe` that the kubelet detected the `spec.containers[0].image` change in the manifest, pulled `nginx:1.26-alpine`, killed the old `1.25-alpine` container, and started the new version!*
+    *(Clean up the temporary files when done: `rm -f my-nginx.yaml my-nginx.yaml.bak`.)*
+
+#### 1.2.2 The Declarative Way (Pre-Written YAML Configuration)
 Review the file [pod-single.yaml](manifests/pod-single.yaml):
 ```yaml
 apiVersion: v1
@@ -72,13 +106,13 @@ Deploy the manifest:
 kubectl apply -f manifests/pod-single.yaml
 ```
 
-#### 1.2.3 Inspecting Deployed vs. Desired State
-To inspect the detailed state of a running resource, output it as YAML:
+#### 1.2.3 Inspecting Deployed (`status`) vs. Desired (`spec`) State
+To inspect the full manifest stored in the Kubernetes API server for a running resource, output it as YAML:
 ```bash
 kubectl get pod nginx-single -o yaml
 ```
-*   **Desired State**: Defined in the **`spec`** block. This is the blueprint you submitted.
-*   **Deployed (Actual) State**: Stored in the **`status`** block. It contains dynamic information like `podIP`, `phase: Running`, container statuses, start times, and node placement.
+*   **Desired State**: Defined in the **`spec`** block. This is the blueprint you submitted (e.g., `image: docker.io/library/nginx:1.25-alpine`).
+*   **Deployed (Actual) State**: Stored in the **`status`** block. It contains dynamic runtime information like `podIP`, `phase: Running`, `containerStatuses` (including the exact resolved `imageID` SHA-256 digest and `restartCount`), start times, and node placement.
 
 #### 1.2.4 Multi-Container Pod Patterns (Sidecar, Init Containers, Ambassador)
 Containers inside a single Pod share the **same network namespace** (they share the same IP address and can talk to each other via `localhost`) and can **share volumes** (`emptyDir`, `PersistentVolumeClaim`, `ConfigMap`).
@@ -756,7 +790,7 @@ In a **Canary** release, you expose a small percentage of live requests to the n
 After finishing this section, clean up all practice resources:
 ```bash
 kubectl delete -f manifests/ --ignore-not-found
-kubectl delete pod tmp-client nginx-imperative --ignore-not-found
+kubectl delete pod tmp-client nginx-imperative nginx-custom --ignore-not-found
 kubectl delete svc nginx-imperative-svc --ignore-not-found
 kubectl delete namespace practice-ns --ignore-not-found   # own cluster only
 ```
