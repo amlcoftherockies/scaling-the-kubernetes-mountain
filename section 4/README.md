@@ -125,6 +125,17 @@ kubectl get pod nginx-single -o yaml
 *   **Desired State**: Defined in the **`spec`** block. This is the blueprint you submitted (e.g., `image: docker.io/library/nginx:1.25-alpine`).
 *   **Deployed (Actual) State**: Stored in the **`status`** block. It contains dynamic runtime information like `podIP`, `phase: Running`, `containerStatuses` (including the exact resolved `imageID` SHA-256 digest and `restartCount`), start times, and node placement.
 
+> [!WARNING]
+> **Beware of "Unmanaged" (Naked) Pods in Production!**
+> The Pods we just created (`nginx-imperative`, `nginx-custom`, and `nginx-single`) are **unmanaged ("naked") Pods**—meaning they were created directly as `kind: Pod` with no `ownerReferences` pointing to a higher-level controller like a **Deployment**, **ReplicaSet**, **StatefulSet**, or **Job**.
+>
+> **Why you should almost never run unmanaged Pods in production:**
+> 1. **No Self-Healing Across Node Failures or Deletions**: While the local node's `kubelet` will restart a crashed container *inside* the Pod (as long as the node itself stays healthy), if someone runs `kubectl delete pod`, if the Pod is **evicted** due to node memory pressure, or if the **worker node dies or drains for an upgrade**, an unmanaged Pod is **gone forever**. No controller will reschedule it onto another node!
+> 2. **Downtime During Updates & Immutable Fields**: As you saw when updating `nginx-custom` from `1.25-alpine` to `1.26-alpine`, Kubernetes had to kill the single running container in-place, causing a brief outage. Furthermore, almost every field on a running Pod *except* `spec.containers[*].image` (such as environment variables, volume mounts, or resource requests) is **immutable**—you cannot edit them without deleting and recreating the Pod!
+> 3. **No Horizontal Scaling or Rollbacks**: You cannot run `kubectl scale` or `kubectl rollout undo` on a naked Pod.
+>
+> *(We use standalone Pods here and on the CKAD exam to learn Pod internals quickly, and in **Module 2** below you will see how wrapping your Pod template inside a **Deployment** solves all three risks!)*
+
 #### 1.2.4 Multi-Container Pod Patterns (Sidecar, Init Containers, Ambassador)
 Containers inside a single Pod share the **same network namespace** (they share the same IP address and can talk to each other via `localhost`) and can **share volumes** (`emptyDir`, `PersistentVolumeClaim`, `ConfigMap`).
 
