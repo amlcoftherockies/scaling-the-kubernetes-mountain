@@ -221,9 +221,9 @@ In our multi-tenant workshop cluster, you are allowed to create **`Role`s** and 
       TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
       CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
       NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
-      curl -sS --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
-        https://kubernetes.default.svc/api/v1/namespaces/$NS/pods | head -n 25
-    '
+      curl -s --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+        https://kubernetes.default.svc/api/v1/namespaces/$NS/pods
+    ' | head -n 25
 
     # 3. Try querying Secrets with the same token (DENIED by RBAC -> 403 Forbidden!):
     kubectl exec api-explorer -- sh -c '
