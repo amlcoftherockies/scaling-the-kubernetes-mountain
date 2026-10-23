@@ -115,7 +115,23 @@ flowchart LR
 
 ---
 
-### 2.2 Hands-On: Auditing Permissions with `kubectl auth can-i` & ServiceAccounts
+### 2.2 Built-In RBAC Privilege Escalation Prevention (Why You Can Create `Role`s Safely!)
+
+In our multi-tenant workshop cluster, you are allowed to create **`Role`s** and **`RoleBinding`s** inside your own namespace—yet you cannot use that power to grant yourself (or a Pod) extra permissions! How does Kubernetes prevent you from creating a `Role` with `verbs: ["*"]` on `resources: ["*"]`?
+
+> [!IMPORTANT]
+> **How Kubernetes RBAC Privilege Escalation Prevention Works:**
+> The Kubernetes API server enforces a strict rule whenever anyone creates or updates a `Role` or `RoleBinding`:
+> 1. **Rule-by-Rule Subset Check (`escalate` guard):** You can **only** create or update a `Role` if **you already hold every single permission (API group, resource, and verb)** listed in that `Role` within that scope.
+> 2. **Binding Check (`bind` guard):** You can **only** create a `RoleBinding` referencing a `Role`/`ClusterRole` if you already hold all the permissions contained in that referenced role.
+> 3. **Namespace Isolation:** Because `Role` and `RoleBinding` are strictly namespaced objects (and you cannot create cluster-wide `ClusterRole`s or `ClusterRoleBinding`s), any permissions you grant to a `ServiceAccount` apply **only inside your namespace**.
+>
+> This means you can safely practice creating least-privilege `ServiceAccount`s, `Role`s, and `RoleBinding`s for your applications (or AI agents / MCP servers!), and if you ever try to include a permission you don't own (such as modifying `ResourceQuota`s), the API server immediately blocks it with:
+> `Forbidden: user ... is attempting to grant RBAC permissions not currently held`.
+
+---
+
+### 2.3 Hands-On: Auditing Permissions, Creating `Role`s & `RoleBinding`s, and Calling the K8s API with a `ServiceAccount` Token
 
 1.  **Inspect the `ServiceAccount`s in your workshop namespace:**
     ```bash
@@ -125,37 +141,91 @@ flowchart LR
 
 2.  **Test your own RBAC permissions using `kubectl auth can-i` (a huge CKAD time-saver!):**
     ```bash
-    kubectl auth can-i create deployments        # yes (allowed by edit role in your namespace)
+    kubectl auth can-i create deployments        # yes (allowed in your namespace)
     kubectl auth can-i get nodes                 # yes (read-only cluster role)
     kubectl auth can-i delete nodes              # no  (cluster-admin only)
-    kubectl auth can-i create roles              # no  (edit role prevents privilege escalation)
+    kubectl auth can-i create roles              # yes (allowed in your namespace, guarded against escalation!)
+    kubectl auth can-i create clusterroles       # no  (cluster-scoped RBAC is forbidden)
     kubectl auth can-i list secrets              # yes (allowed inside your namespace)
     kubectl auth can-i list secrets -n default   # no  (isolated from other namespaces!)
     ```
 
-3.  **Generate `Role` and `RoleBinding` YAML with `--dry-run=client` (CKAD Exam Skill):**
-    On the CKAD exam, you are frequently asked to create a `Role` and `RoleBinding` for a `ServiceAccount`. Never type RBAC YAML by hand—generate it with `kubectl create`:
+3.  **Test RBAC Privilege Escalation Prevention in Action:**
+    Try creating a `Role` that grants permission to `delete` `resourcequotas` (a permission you do **not** hold):
     ```bash
-    # Generate a Role that allows reading pods and pod logs
+    kubectl create role sneaky-admin --verb=delete --resource=resourcequotas
+    ```
+    *Observe the API server catches the escalation attempt and rejects it with `Error from server (Forbidden): roles.rbac.authorization.k8s.io "sneaky-admin" is forbidden: user ... is attempting to grant RBAC permissions not currently held`!*
+
+4.  **Create a `ServiceAccount`, `Role`, and `RoleBinding` Imperatively (CKAD Exam Skill):**
+    On the CKAD exam, never type RBAC YAML by hand—use `kubectl create` (and add `--dry-run=client -o yaml` whenever you want to inspect the generated manifest):
+    ```bash
+    NS=$(kubectl config view --minify -o jsonpath='{..namespace}')
+
+    # 1. Create a dedicated ServiceAccount for a Pod that needs to read Pods
+    kubectl create serviceaccount pod-inspector-sa
+
+    # 2. Create a Role that ONLY allows get, list, watch on pods and pods/log
     kubectl create role pod-reader \
       --verb=get,list,watch \
-      --resource=pods,pods/log \
-      --dry-run=client -o yaml
+      --resource=pods,pods/log
 
-    # Generate a RoleBinding granting pod-reader to ServiceAccount app-runner-sa
+    # 3. Bind the pod-reader Role to pod-inspector-sa in your namespace
     kubectl create rolebinding pod-reader-binding \
       --role=pod-reader \
-      --serviceaccount=$NS:app-runner-sa \
-      --dry-run=client -o yaml
+      --serviceaccount=$NS:pod-inspector-sa
+
+    # 4. Verify the ServiceAccount's exact permissions using --as!
+    kubectl auth can-i list pods --as=system:serviceaccount:$NS:pod-inspector-sa       # yes!
+    kubectl auth can-i delete pods --as=system:serviceaccount:$NS:pod-inspector-sa     # no! (read-only)
+    kubectl auth can-i list secrets --as=system:serviceaccount:$NS:pod-inspector-sa    # no! (pods only)
     ```
 
-4.  **Create a Custom `ServiceAccount` & Pod (`automountServiceAccountToken: false`):**
-    By default, Kubernetes mounts a ServiceAccount JWT token at `/var/run/secrets/kubernetes.io/serviceaccount/token` inside every Pod. If your application doesn't talk to the Kubernetes API, best practice (and a common CKAD question!) is to set **`automountServiceAccountToken: false`**.
+5.  **Call the Kubernetes API Directly from Inside a Pod Using a Mounted `ServiceAccount` Token:**
+    When a Pod runs with a `ServiceAccount` (unless `automountServiceAccountToken: false` is set), the `kubelet` automatically mounts three files into `/var/run/secrets/kubernetes.io/serviceaccount/`:
+    *   `token`: A signed, time-bound JWT bearer token identifying the `ServiceAccount`.
+    *   `ca.crt`: The cluster's public Certificate Authority bundle (to verify `https://kubernetes.default.svc`).
+    *   `namespace`: The Pod's current namespace name.
+
+    Let's launch a Pod running as `pod-inspector-sa` and use its mounted token to query the Kubernetes API server over HTTPS:
+    ```bash
+    # Launch a curl pod using our pod-inspector-sa ServiceAccount
+    kubectl run api-explorer \
+      --image=curlimages/curl:8.7.1 \
+      --overrides='{"spec":{"serviceAccountName":"pod-inspector-sa"}}' \
+      -- sleep 3600
+    kubectl wait --for=condition=Ready pod/api-explorer --timeout=60s
+
+    # 1. Inspect the auto-mounted ServiceAccount files inside the container:
+    kubectl exec api-explorer -- ls -la /var/run/secrets/kubernetes.io/serviceaccount
+
+    # 2. Query the Kubernetes API for Pods in your namespace (ALLOWED by pod-reader Role -> 200 OK!):
+    kubectl exec api-explorer -- sh -c '
+      TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      curl -sS --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+        https://kubernetes.default.svc/api/v1/namespaces/$NS/pods | head -n 25
+    '
+
+    # 3. Try querying Secrets with the same token (DENIED by RBAC -> 403 Forbidden!):
+    kubectl exec api-explorer -- sh -c '
+      TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      curl -sS --cacert $CACERT -H "Authorization: Bearer $TOKEN" \
+        https://kubernetes.default.svc/api/v1/namespaces/$NS/secrets
+    '
+    ```
+    *Notice how querying `/pods` returns the live `PodList` JSON from the API server, while querying `/secrets` returns `"status": "Failure", "reason": "Forbidden", "code": 403` because `pod-reader` only grants access to `pods`!*
+
+6.  **Opt Out of Token Mounting (`automountServiceAccountToken: false`):**
+    If your application **doesn't** need to call the Kubernetes API (which is true for 95% of web apps and microservices!), best practice—and a classic CKAD exam task—is to set **`automountServiceAccountToken: false`** on the `ServiceAccount` or `Pod` spec so a compromised container cannot steal a Kubernetes API token:
     ```bash
     kubectl apply -f manifests/serviceaccount-pod.yaml
     kubectl wait --for=condition=Ready pod/pod-custom-sa --timeout=60s
 
-    # Verify the Pod uses app-runner-sa and that no token volume was mounted:
+    # Verify the Pod uses app-runner-sa and that NO token volume was mounted:
     kubectl get pod pod-custom-sa -o jsonpath='{.spec.serviceAccountName}'; echo ""
     kubectl exec pod-custom-sa -- ls /var/run/secrets/kubernetes.io/serviceaccount
     ```
@@ -297,4 +367,8 @@ To prevent a single runaway container from starving an entire node (or a single 
 Clean up all resources created in this section:
 ```bash
 kubectl delete -f manifests/pod-resources.yaml -f manifests/networkpolicy.yaml -f manifests/netpol-setup.yaml -f manifests/serviceaccount-pod.yaml -f manifests/pod-securitycontext.yaml --ignore-not-found
+kubectl delete pod api-explorer --ignore-not-found
+kubectl delete rolebinding pod-reader-binding --ignore-not-found
+kubectl delete role pod-reader --ignore-not-found
+kubectl delete serviceaccount pod-inspector-sa --ignore-not-found
 ```

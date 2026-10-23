@@ -308,8 +308,11 @@ check_allowed "Section 7: Read Node & Pod Metrics (kubectl top)" \
   list pods.metrics.k8s.io -n "$NS"
 
 # Section 8: Security, RBAC & NetworkPolicy
-check_allowed "Section 8: Create ServiceAccounts & NetworkPolicies in ${NS}" \
-  "Cannot create NetworkPolicies or ServiceAccounts in ${NS}. Verify 'edit' RoleBinding." \
+check_allowed "Section 8: Create ServiceAccounts, Roles, RoleBindings & NetworkPolicies" \
+  "Cannot create Roles, RoleBindings, ServiceAccounts, or NetworkPolicies in ${NS}. Run 'labctl-gke infra --apply'." \
+  create roles.rbac.authorization.k8s.io -n "$NS"
+check_allowed "Section 8: Create NetworkPolicies in ${NS}" \
+  "Cannot create NetworkPolicies in ${NS}. Verify 'edit' RoleBinding." \
   create networkpolicies.networking.k8s.io -n "$NS"
 
 # Section 9: Services, Ingress & Gateway API HTTPRoutes
