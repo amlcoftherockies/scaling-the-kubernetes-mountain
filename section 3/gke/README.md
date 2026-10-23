@@ -1,4 +1,7 @@
-# Section 3 (GCP lab version): Connect to the Workshop Cluster
+# Section 3 (GCP Lab Guide): Connect to the Workshop Cluster
+
+> [!IMPORTANT]
+> **Instructor-Led Course:** During an instructor-led session, the shared GKE cluster is already provisioned for you—you just need to connect! Check your inbox for an email titled **`Your CKAD workshop cluster access`** with your personal **`ckad-lab.kubeconfig`** attached, then follow Steps 1–3 below to verify `kubectl` and set up your `kubeconfig`.
 
 In the GCP version of the workshop, the instructor runs **one shared Google Kubernetes Engine (GKE) cluster**. You get your **own namespace** on it, and you'll find a ready-made **kubeconfig** attached to your workshop email.
 

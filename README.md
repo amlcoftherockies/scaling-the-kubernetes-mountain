@@ -9,7 +9,7 @@ Hands-on Kubernetes workshop curriculum by **AMLC of the Rockies**.
 ### 1. CKAD Track (Certified Kubernetes Application Developer) — *Active*
 You receive a personal `ckad-lab.kubeconfig` via email connected to your own isolated namespace on our shared Kubernetes cluster. No cloud account or Terraform required!
 
-- **[Section 3: Connect to the Workshop Cluster](section%203/gke/README.md)** *(Optional CKAD lab smoke test — or run [`./scripts/ckad-lab-smoke-test.sh`](scripts/ckad-lab-smoke-test.sh) to verify your connection, guardrails, and CKAD lab readiness!)*
+- **[Section 3: Connect to the Workshop Cluster](section%203/README.md)** *(Verify `kubectl`, set up your emailed `ckad-lab.kubeconfig`, and run [`./scripts/ckad-lab-smoke-test.sh`](scripts/ckad-lab-smoke-test.sh))*
 - **[Section 4: Core Kubernetes Architecture & Workloads](section%204/README.md)** *(Pods, Multi-Container Patterns, ReplicaSets, Deployments, DaemonSets, Jobs & CronJobs, Blue-Green & Canary, Services, DNS)*
 - **[Section 5: Configuration, Persistent Storage & StatefulSets](section%205/README.md)** *(ConfigMaps, Secrets, PVCs/PVs, StorageClasses, StatefulSets)*
 - **[Section 6: Container Image Lifecycle & Runtime Sandboxing](section%206/README.md)** *(OCI Standards, Image Optimization, Multi-Stage Builds, Registries, Digests, `imagePullPolicy`, gVisor `RuntimeClass`)*
