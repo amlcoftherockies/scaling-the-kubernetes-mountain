@@ -340,45 +340,129 @@ By default in Kubernetes, **all Pods can talk to all other Pods** unless restric
 
 ---
 
-## ⚖️ Module 4: Resource Requests, Limits, `LimitRange` & `ResourceQuota`
+## ⚖️ Module 4: Resource Requests, Limits, `LimitRange`, `ResourceQuota` & How `kube-scheduler` Places Pods
 
-To prevent a single runaway container from starving an entire node (or a single namespace from consuming the whole cluster), Kubernetes provides three layers of resource governance:
+To prevent a single runaway container from starving an entire node (or a single namespace from consuming the whole cluster), Kubernetes provides three layers of resource governance—and uses **`resources.requests`** as the foundation for all scheduling decisions:
 
 | Mechanism | Scope | What It Does |
 | :--- | :--- | :--- |
-| **`resources.requests` & `limits`** | Per Container (`Pod` spec) | • **`requests`**: Minimum CPU/Memory guaranteed to the container; used by **`kube-scheduler`** to pick a node with enough free capacity.<br>• **`limits`**: Hard ceiling enforced by the Linux kernel (**cgroups**). Exceeding CPU limit -> **CPU throttling**; exceeding Memory limit -> **`OOMKilled` (Exit Code 137)**! |
+| **`resources.requests` & `limits`** | Per Container (`Pod` spec) | • **`requests`**: Minimum CPU/Memory reserved for the container; used by **`kube-scheduler`** to pick a node with enough free `Allocatable` capacity.<br>• **`limits`**: Hard ceiling enforced by the Linux kernel (**cgroups**). Exceeding CPU limit -> **CPU throttling**; exceeding Memory limit -> **`OOMKilled` (Exit Code 137)**! |
 | **`LimitRange`** | Namespace | Injects **`defaultRequest`** and **`default`** limits into any container that omits `resources`, and enforces per-container `min`/`max` bounds. |
 | **`ResourceQuota`** | Namespace | Caps the **aggregate sum** of CPU requests/limits, memory requests/limits, PVCs, Services, and Pod counts across all Pods in the namespace. |
 
-### 4.1 Hands-On: Inspecting `LimitRange` & `ResourceQuota`, Defining Resources, and Triggering Quota Guardrails
+---
 
-1.  **Inspect the active `LimitRange` and `ResourceQuota` in your namespace:**
+### 4.1 How `kube-scheduler` Makes Scheduling Decisions (`Filter` -> `Score` -> `Bind`)
+
+A very common misconception is that `kube-scheduler` checks a node's live CPU/Memory usage (`kubectl top nodes`) before placing a Pod. **It does NOT!**
+
+Instead, `kube-scheduler` treats every node like a reservation ledger based strictly on **`resources.requests`**:
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│ Newly Created Pod (spec.nodeName == "")                                   │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ PHASE 1: FILTERING (Predicates — Which nodes CAN run this Pod?)           │
+│   • Resource Requests: Node Allocatable >= Sum(Existing Pod Requests)     │
+│                        + New Pod's resources.requests                     │
+│   • Node Selectors / Node Affinity: Does node have required labels?       │
+│   • Taints & Tolerations: Does Pod tolerate the node's taints?            │
+│   • Volume Topology: Is node in the same zone as the Pod's PVC disk?      │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ PHASE 2: SCORING (Priorities — Which surviving node is BEST?)             │
+│   • Ranks candidate nodes (e.g., spreading Pods across zones/nodes,       │
+│     least-requested capacity, or whether the container image is cached).  │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ PHASE 3: BINDING (Or FailedScheduling -> Cluster Autoscaler!)             │
+│   • Winner found   ──► Sets Pod's spec.nodeName; target kubelet starts it │
+│   • 0 nodes match  ──► Pod stays "Pending" (FailedScheduling event)       │
+│                        ──► Cluster Autoscaler sees Pending Pod & adds VM! │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+> [!IMPORTANT]
+> **Why Accurate `requests` Matter in Production (and AI/ML GPU Clusters):**
+> *   **Under-requesting (`requests` too low):** `kube-scheduler` packs too many Pods onto one node because the reservation ledger looks empty. Under real load, the node runs out of physical RAM and the Linux kernel **OOMKills** containers (`Exit Code 137`) or throttles CPU!
+> *   **Over-requesting (`requests` too high):** `kube-scheduler` thinks nodes are "full" (`Allocated Requests = 95%`) even when actual CPU usage in `kubectl top nodes` is only `5%`—wasting cloud VMs and triggering unnecessary Cluster Autoscaler scale-ups!
+
+---
+
+### 4.2 Hands-On: Inspecting the Node Reservation Ledger, `LimitRange`, `ResourceQuota`, and Scheduling Constraints
+
+1.  **Inspect a Worker Node's Reservation Ledger (`Capacity` vs. `Allocatable` vs. `Allocated resources`):**
+    Pick one of the cluster's worker nodes and inspect how `kube-scheduler` views its capacity:
+    ```bash
+    NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+    kubectl describe node $NODE | grep -A 18 "Allocated resources:"
+    ```
+    *Look closely at the `Allocated resources:` table at the bottom of `kubectl describe node`:*
+    *   **`Requests` column**: The exact sum of `resources.requests` of all Pods currently scheduled on that node. **If `New Pod Request + Allocated Requests > Node Allocatable`, `kube-scheduler` will NOT place the Pod on this node!**
+    *   **`Limits` column**: Can exceed `100%` (overcommitment), because not every Pod bursts to its ceiling at the exact same millisecond.
+
+2.  **Inspect Node Labels & Taints (Why Normal Pods Never Land on the `gvisor` Node!):**
+    In Phase 1 (`Filtering`), `kube-scheduler` checks **Node Labels** (`nodeSelector` / `nodeAffinity`) and **Node Taints** (`tolerations`):
+    ```bash
+    # View node labels (machine type, zone, OS, and sandbox runtime):
+    kubectl get nodes --show-labels
+
+    # Inspect the Taint on our gVisor node:
+    kubectl describe node -l sandbox.gke.io/runtime=gvisor | grep -E "Name:|Taints:"
+    ```
+    *Notice `Taints: sandbox.gke.io/runtime=gvisor:NoSchedule`! That `NoSchedule` taint repels all ordinary Pods so general workloads don't accidentally consume the sandbox node pool (or expensive GPU nodes like `nvidia.com/gpu=present:NoSchedule`). Only Pods with a matching **toleration** and **nodeSelector** are scheduled there!*
+
+3.  **Inspect the active `LimitRange` and `ResourceQuota` in your namespace:**
     ```bash
     kubectl describe limitrange workshop-defaults
     kubectl describe resourcequota workshop-quota
     ```
     *Notice how `workshop-defaults` automatically injects `defaultRequest: cpu=50m, memory=64Mi` and `default: cpu=200m, memory=256Mi` whenever you deploy a Pod without a `resources:` block, and enforces `max: cpu=1, memory=2Gi` per container!*
 
-2.  **Deploy a Pod with explicit CPU and Memory `requests` and `limits` ([manifests/pod-resources.yaml](manifests/pod-resources.yaml)):**
+4.  **Deploy a Pod with explicit CPU and Memory `requests` and `limits` ([manifests/pod-resources.yaml](manifests/pod-resources.yaml)):**
     ```bash
     kubectl apply -f manifests/pod-resources.yaml
     kubectl wait --for=condition=Ready pod/pod-resources-demo --timeout=60s
 
-    # Check the QoS Class assigned by Kubernetes (Burstable vs Guaranteed vs BestEffort):
-    kubectl get pod pod-resources-demo -o jsonpath='QoS={.status.qosClass} Requests={.spec.containers[0].resources.requests} Limits={.spec.containers[0].resources.limits}'; echo ""
+    # Check the QoS Class assigned by Kubernetes (Burstable vs Guaranteed vs BestEffort) and which node it landed on:
+    kubectl get pod pod-resources-demo -o jsonpath='Node={.spec.nodeName} QoS={.status.qosClass} Requests={.spec.containers[0].resources.requests} Limits={.spec.containers[0].resources.limits}'; echo ""
 
     # Check how your namespace ResourceQuota usage ("Used" column) increased:
     kubectl describe resourcequota workshop-quota
     ```
     *Because `requests` (`100m` / `128Mi`) are lower than `limits` (`250m` / `256Mi`), Kubernetes assigns `qosClass: Burstable` (if `requests == limits` for both CPU and memory, it becomes `Guaranteed`).*
 
-3.  **Test What Happens When a Pod Exceeds `LimitRange` / `ResourceQuota`:**
+5.  **Test What Happens When a Pod Cannot Be Scheduled (`Pending` + `FailedScheduling` Event):**
+    Let's deploy a Pod with a `nodeSelector` (`disktype=nvme-ultra`) that no node in the cluster has, and see how `kube-scheduler` records its scheduling decision:
+    ```bash
+    kubectl run unschedulable-demo --image=docker.io/library/busybox:1.36 \
+      --overrides='{"spec":{"nodeSelector":{"disktype":"nvme-ultra"}}}' \
+      -- sleep 3600
+
+    # Check the Pod status (it stays Pending!):
+    kubectl get pod unschedulable-demo
+
+    # Inspect the FailedScheduling event from default-scheduler:
+    kubectl describe pod unschedulable-demo | tail -n 10
+    ```
+    *Look at the `Events:` output from `default-scheduler`:*
+    `Warning  FailedScheduling  ...  0/4 nodes are available: 1 node(s) had untolerated taint {sandbox.gke.io/runtime: gvisor}, 3 node(s) didn't match Pod's node affinity/selector.`
+    *Delete the unschedulable test pod:*
+    ```bash
+    kubectl delete pod unschedulable-demo
+    ```
+
+6.  **Test What Happens When a Pod Exceeds `LimitRange` / `ResourceQuota`:**
     Try creating a Pod that requests `8` CPUs and `16Gi` of RAM (exceeding both `LimitRange` `max` and `ResourceQuota`):
     ```bash
     kubectl run quota-buster --image=busybox:1.36 \
       --overrides='{"spec":{"containers":[{"name":"quota-buster","image":"busybox:1.36","command":["sleep","60"],"resources":{"requests":{"cpu":"8","memory":"16Gi"},"limits":{"cpu":"8","memory":"16Gi"}}}]}}'
     ```
-    *The API server immediately rejects the Pod:*
+    *Before `kube-scheduler` even sees the Pod, the API server's admission controller immediately rejects it:*
     ```text
     Error from server (Forbidden): pods "quota-buster" is forbidden: [maximum cpu usage per Container is 1, but limit is 8, maximum memory usage per Container is 2Gi, but limit is 16Gi]
     ```
