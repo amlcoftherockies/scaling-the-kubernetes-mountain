@@ -160,13 +160,6 @@ Pods are ephemeral: if they die, their local filesystems are lost. To persist da
 | **PersistentVolume (PV)** | **Cluster-wide** | A cluster admin by hand, or (almost always) a **provisioner** automatically |
 | **PersistentVolumeClaim (PVC)** | **Your namespace** | **You, the app developer.** It's your request: "I need 1Gi, read-write" |
 
-```mermaid
-graph LR
-    Pod[Pod] -->|Mounts| PVC["PersistentVolumeClaim (namespace scope)"]
-    PVC -->|Binds to| PV["PersistentVolume (cluster scope)"]
-    SC["StorageClass (default)"] -.->|provisions| PV
-    PV -->|Points to| Disk["Cloud disk / NFS / ..."]
-```
 
 As an app developer (and on the CKAD exam) you **ask for storage with a PVC**. A PV is then found for you, or created on the spot, and bound to your claim.
 
@@ -331,6 +324,21 @@ Deployments are designed for stateless applications. For applications that requi
 ### 4.1 Headless Services & StatefulSets
 
 A StatefulSet requires a **Headless Service** (a Service with `clusterIP: None`) to handle DNS resolution for individual pods.
+
+> [!IMPORTANT]
+> **Why Use a Headless Service for SQL Databases?**
+> Stateful databases like **MySQL** or **PostgreSQL** usually run in a **Primary-Replica (Master-Slave)** topology where:
+> *   **Writes** must go to **only one specific Pod** (the Primary).
+> *   **Reads** can be spread across multiple Replica Pods.
+>
+> If you used a regular `ClusterIP` Service for writes, `kube-proxy` would randomly load-balance your `INSERT` statements across all Pods—accidentally sending writes to Read-Only Replica Pods and failing!
+>
+> With a **Headless Service (`clusterIP: None`)** paired with a **StatefulSet**:
+> *   **Direct Pod Addressing (Deterministic Hostnames)**: Kubernetes assigns a unique, stable network identity to each Pod in the StatefulSet:
+>     *   `postgres-0.postgres-headless.<namespace>.svc.cluster.local`
+>     *   `postgres-1.postgres-headless.<namespace>.svc.cluster.local`
+>     *   `postgres-2.postgres-headless.<namespace>.svc.cluster.local`
+> *   Your application (or database operator) can target **`postgres-0`** directly for all write operations because its hostname and underlying volume remain stable across restarts!
 
 1.  Review and deploy the Headless Service [service-headless.yaml](manifests/service-headless.yaml):
     ```bash
