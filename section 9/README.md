@@ -19,11 +19,13 @@ On the CKAD exam, applications often listen on non-standard ports (like `8080`, 
 
 ### 1.1 `port` vs. `targetPort` vs. `nodePort` (and Named Ports)
 
-```mermaid
-flowchart LR
-    Client["<b>Cluster Client</b>"] -->|"Service port: 80<br/>or 8081"| SVC["<b>Service: multi-port-svc</b><br/>• name: web (80 → http-api)<br/>• name: admin (8081 → 9090)"]
-    SVC -->|"targetPort: http-api (8080)"| C1["<b>Container: app-api</b><br/>containerPort: 8080<br/>(name: http-api)"]
-    SVC -->|"targetPort: 9090"| C2["<b>Container: admin-diag</b><br/>containerPort: 9090<br/>(name: http-admin)"]
+```text
+┌────────────────┐      ┌──────────────────────────────────┐      ┌────────────────────────────────────┐
+│                │ :80  │     Service: multi-port-svc      │ ───► │ Container: app-api                 │
+│ Cluster Client │ ───► │ • name: web   (80   -> http-api) │      │ containerPort: 8080 (name: http-api│
+│                │ :8081│ • name: admin (8081 -> 9090)     │ ───► │ Container: admin-diag              │
+└────────────────┘      └──────────────────────────────────┘      │ containerPort: 9090                │
+                                                                  └────────────────────────────────────┘
 ```
 
 *   **`port` (Service Port)**: The virtual TCP/UDP port exposed on the Service's `ClusterIP` (what clients call, e.g., `http://my-svc:80`).
@@ -105,11 +107,23 @@ Suppose your application code is hardcoded to connect to `http://external-paymen
 
 While a `LoadBalancer` Service operates at **Layer 4 (TCP/UDP)** and requires a separate cloud load balancer (and public IP) for every single Service, an **`Ingress`** operates at **Layer 7 (HTTP/HTTPS)**. One shared Ingress Controller (in our cluster, **Traefik** behind `136.80.107.173`) can route traffic for dozens of hostnames and URL paths!
 
-```mermaid
-flowchart LR
-    Browser["<b>Internet Client</b><br/>http://&lt;ns&gt;.amlcoftherockies.net"] -->|"DNS *.amlcoftherockies.net<br/>(136.80.107.173)"| Traefik["<b>Shared Traefik Ingress / Gateway</b><br/>(namespace: lab-ingress)"]
-    Traefik -->|"Path: /v1"| V1["<b>Service: v1-svc (:80)</b><br/>→ Deployment app-v1 (:5678)"]
-    Traefik -->|"Path: /v2"| V2["<b>Service: v2-svc (:80)</b><br/>→ Deployment app-v2 (:5678)"]
+```text
+┌────────────────────────────────────┐
+│ Internet Client                    │
+│ http://<ns>.amlcoftherockies.net   │
+└─────────────────┬──────────────────┘
+                  │ DNS *.amlcoftherockies.net -> 136.80.107.173
+                  ▼
+┌────────────────────────────────────┐
+│ Shared Traefik Ingress / Gateway   │
+│ (namespace: lab-ingress)           │
+└────────┬──────────────────┬────────┘
+Path: /v1│                  │Path: /v2
+         ▼                  ▼
+┌───────────────────┐    ┌───────────────────┐
+│ Service: v1-svc   │    │ Service: v2-svc   │
+│ (:80 -> Pod :5678)│    │ (:80 -> Pod :5678)│
+└───────────────────┘    └───────────────────┘
 ```
 
 ### 3.1 Key `Ingress` Concepts for CKAD

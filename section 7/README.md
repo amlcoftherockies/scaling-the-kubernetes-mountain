@@ -20,27 +20,21 @@ By default, Kubernetes only knows if a container's main process (`PID 1`) is sti
 
 ### 1.1 The Three Probe Types
 
-```mermaid
-sequenceDiagram
-    participant K as kubelet
-    participant P as Container
-    participant S as Service Endpoints
-
-    Note over K,P: Phase 1: Startup Probe (runs first; blocks other probes until it succeeds)
-    K->>P: startupProbe (httpGet /:80)
-    P-->>K: 200 OK (Boot finished!)
-
-    Note over K,S: Phase 2: Readiness & Liveness run continuously in parallel
-    K->>P: readinessProbe (exec: cat /tmp/ready)
-    P-->>K: Exit 0 -> Add Pod IP to Service Endpoints
-    K->>P: livenessProbe (httpGet /:80)
-    P-->>K: 200 OK -> Keep container running
-
-    Note over K,S: What happens on failure?
-    K->>P: readinessProbe fails (Exit 1)
-    K->>S: Remove Pod IP from Service (NO container restart!)
-    K->>P: livenessProbe fails (500 / timeout)
-    K->>P: Kill & restart container (RESTARTS +1)
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 1: STARTUP PROBE (Runs first; blocks other probes until it succeeds) │
+│   kubelet ──[startupProbe: httpGet /:80]──► Container                      │
+│   kubelet ◄────────[200 OK: Boot finished!]── Container                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 2: READINESS & LIVENESS (Run continuously in parallel)               │
+│   • readinessProbe (exec: cat /tmp/ready)                                  │
+│       ├─► Succeeds (Exit 0) ──► Pod IP ADDED to Service Endpoints          │
+│       └─► Fails    (Exit 1) ──► Pod IP REMOVED from Service (NO restart!)  │
+│                                                                            │
+│   • livenessProbe (httpGet /:80)                                           │
+│       ├─► Succeeds (200 OK) ──► Container stays Running                    │
+│       └─► Fails    (500/TO) ──► Container KILLED & RESTARTED (RESTARTS +1) │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Probe Type | Purpose | What happens when it fails? | When to use |
@@ -249,11 +243,26 @@ kubectl wait --for=condition=Ready pod/metrics-demo --timeout=60s
 
 On the CKAD exam, you will frequently be handed a broken Deployment or Service and asked to make it work. Use this **4-step systematic workflow** every time:
 
-```mermaid
-flowchart TD
-    S1["<b>Step 1: Check Pod Status</b><br/>kubectl get pods<br/>(Inspect STATUS & READY columns)"] --> S2["<b>Step 2: Inspect Pod Events</b><br/>kubectl describe pod<br/>(Image pull, scheduling, or probe errors)"]
-    S2 --> S3["<b>Step 3: Check Container Logs</b><br/>kubectl logs &lt;pod&gt; [--previous]<br/>(Inspect app crash output)"]
-    S3 --> S4["<b>Step 4: Verify Service & Endpoints</b><br/>kubectl get svc,ep<br/>(Confirm Service selector matches Pod labels)"]
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 1: Check Pod Status         kubectl get pods                       │
+│                                  (Inspect STATUS & READY columns)       │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 2: Inspect Pod Events       kubectl describe pod <pod>             │
+│                                  (Image pull, scheduling, probe errors) │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 3: Check Container Logs     kubectl logs <pod> [--previous]        │
+│                                  (Inspect application crash output)     │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 4: Verify Service Routing   kubectl get svc,ep                     │
+│                                  (Confirm Service selector == Pod label)│
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 5.1 Deploy the Broken Application

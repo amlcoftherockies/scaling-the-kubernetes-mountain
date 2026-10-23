@@ -18,10 +18,22 @@ Real-world Kubernetes applications (like Redis, PostgreSQL, Prometheus, or multi
 
 *   **How Helm 3 works inside a single namespace:** Helm v3 has **no server-side daemon** (unlike legacy Helm v2's `Tiller`). It uses your existing `KUBECONFIG` and stores release history as regular Kubernetes Secrets (`type: helm.sh/release.v1`) right inside your namespace!
 
-```mermaid
-flowchart TD
-    Repo["<b>1. Helm Repo / OCI Registry</b><br/>Chart: templates/ + default values.yaml"] --> CLI["<b>2. Helm CLI (helm install / upgrade)</b><br/>Merges your custom podinfo-values.yaml"]
-    CLI -->|"Renders YAML & applies via KUBECONFIG"| NS["<b>3. Your Namespace</b><br/>• Deployment & Service<br/>• Release Secret: sh.helm.release.v1.my-app.v1"]
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. HELM REPO / OCI REGISTRY: Chart (templates/ + default values.yaml)   │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. HELM CLI: helm install / upgrade -f helm/podinfo-values.yaml         │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ Renders YAML & applies via KUBECONFIG
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 3. YOUR NAMESPACE:                                                      │
+│    • Deployment & Service resources                                     │
+│    • Release history Secret (sh.helm.release.v1.my-podinfo.v1)          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -109,13 +121,22 @@ Verify it: `helm version`
 
 Unlike Helm (which uses Go `{{ .Values.foo }}` templates), **Kustomize** is built directly into `kubectl` (`kubectl kustomize` and `kubectl apply -k`) and works on **plain, valid Kubernetes YAML** using a **`base/` + `overlays/`** directory structure:
 
-```mermaid
-flowchart TD
-    Base["<b>kustomize/base/</b><br/>• kustomization.yaml<br/>• deployment.yaml & service.yaml<br/>• configMapGenerator"]
-    Dev["<b>kustomize/overlays/dev/</b><br/>• namePrefix: dev-<br/>• replicas: 1<br/>• LOG_LEVEL=debug"]
-    Prod["<b>kustomize/overlays/prod/</b><br/>• namePrefix: prod-<br/>• replicas: 3<br/>• LOG_LEVEL=warn + patch-resources.yaml"]
-    Base --> Dev
-    Base --> Prod
+```text
+              ┌────────────────────────────────────────────┐
+              │              kustomize/base/               │
+              │  • kustomization.yaml                      │
+              │  • deployment.yaml & service.yaml          │
+              │  • configMapGenerator                      │
+              └───────────┬────────────────────┬───────────┘
+                          │                    │
+                          ▼                    ▼
+┌───────────────────────────────────┐  ┌───────────────────────────────────┐
+│      kustomize/overlays/dev/      │  │     kustomize/overlays/prod/      │
+│  • namePrefix: dev-               │  │  • namePrefix: prod-              │
+│  • replicas: 1                    │  │  • replicas: 3                    │
+│  • LOG_LEVEL=debug                │  │  • LOG_LEVEL=warn                 │
+│                                   │  │  • patch-resources.yaml           │
+└───────────────────────────────────┘  └───────────────────────────────────┘
 ```
 
 ### 2.1 Why Kustomize's `configMapGenerator` is Magic
@@ -178,11 +199,23 @@ Kubernetes doesn't only manage built-in objects like `Pod`s and `Deployment`s. A
 
 ### 3.1 The Operator Pattern & Why Cluster Scope vs. Namespace Scope Matters
 
-```mermaid
-flowchart TD
-    Admin["<b>Platform Admin (Cluster Scope)</b>"] -->|"1. Installs CRD & Operator Controller<br/>(Gateway API, Prometheus Operator, Kubeflow)"| API["<b>Kubernetes API Server</b><br/>Registers New Kind:<br/>HTTPRoute / PodMonitoring"]
-    Dev["<b>App Developer — You! (Namespace Scope)</b>"] -->|"2. kubectl apply Custom Resource (CR)<br/>inside your namespace"| API
-    API -->|"3. Watch & Reconcile Loop"| Op["<b>Operator Controller Pod</b><br/>Configures Traefik / Prometheus scraper"]
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. PLATFORM ADMIN (Cluster Scope)                                       │
+│    Installs CRD & Operator Controller (Gateway API, Prometheus, etc.)   │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ Registers New API Kind
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. KUBERNETES API SERVER                                                │
+│    Exposes Custom Resource Kinds (HTTPRoute, PodMonitoring, ...)        │
+└───────────────────────────────────▲─────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────┴─────────────────────────────────────┐
+│ 3. APP DEVELOPER — YOU! (Namespace Scope)                               │
+│    Runs `kubectl apply` to create Custom Resources in your namespace    │
+│    ──► Operator Controller watches API & reconciles live infrastructure │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 *   **Installing an Operator** (registering the `CRD` and `ClusterRole`) is a **cluster-admin** task done once per cluster.

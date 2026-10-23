@@ -98,11 +98,28 @@ In Kubernetes, human users and automated processes authenticate differently, but
 
 ### 2.1 How RBAC Works (`Role`, `ClusterRole`, `RoleBinding`, `ClusterRoleBinding`)
 
-```mermaid
-flowchart TD
-    SA["<b>Subject (Who)</b><br/>ServiceAccount / User / Group"] --> RB["<b>Binding (Where)</b><br/>RoleBinding (Single Namespace)<br/>or ClusterRoleBinding (Cluster-wide)"]
-    RB --> R["<b>Role (What Rules)</b><br/>Role (Namespaced rules)<br/>or ClusterRole (Reusable / Cluster rules)"]
-    R --> API["<b>Target API Resources & Verbs</b><br/>Resources: pods, secrets, deployments...<br/>Verbs: get, list, watch, create, delete..."]
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SUBJECT (Who)          ServiceAccount  |  User  |  Group                │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ bound via
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ BINDING (Where)        RoleBinding (Single Namespace)                   │
+│                        or ClusterRoleBinding (Cluster-Wide)             │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ references
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ ROLE (What Rules)      Role (Namespaced rules)                          │
+│                        or ClusterRole (Reusable / Cluster-scoped rules) │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ grants
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ API RESOURCES & VERBS  Resources: pods, secrets, deployments, ...       │
+│                        Verbs:     get, list, watch, create, delete, ... │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Object | Scope | Purpose |
@@ -242,10 +259,16 @@ By default in Kubernetes, **all Pods can talk to all other Pods** unless restric
     2.  **`namespaceSelector`**: Matches Pods in namespaces carrying a specific label.
     3.  **`ipBlock`**: Matches external CIDR ranges (e.g., `10.0.0.0/8`).
 
-```mermaid
-flowchart LR
-    FE["<b>Pod: frontend-client</b><br/>label: role=frontend"] ==>|"ALLOWED<br/>(Unrestricted)"| BE["<b>Service: backend-svc</b><br/>app=backend-api"]
-    INT["<b>Pod: intruder-client</b><br/>label: role=untrusted"] -.->|"DROPPED by Egress NetworkPolicy<br/>(restrict-intruder-egress)"| BE
+```text
+┌────────────────────────┐                        ┌─────────────────────────┐
+│  Pod: frontend-client  │ ═══ ALLOWED (80/TCP) ═►│   Service: backend-svc  │
+│  (label: role=frontend)│                        │   (app=backend-api)     │
+└────────────────────────┘                        └─────────────────────────┘
+                                                               ▲
+┌────────────────────────┐                                     │
+│  Pod: intruder-client  │ ─── DROPPED by Egress NetworkPolicy ╳
+│ (label: role=untrusted)│     (restrict-intruder-egress)
+└────────────────────────┘
 ```
 
 > [!NOTE]
