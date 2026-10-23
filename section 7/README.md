@@ -79,6 +79,10 @@ Review [manifests/pod-probes.yaml](manifests/pod-probes.yaml). It deploys a Pod 
     ```
     *Notice the Pod's IP is listed under `ENDPOINTS` because both `startupProbe` and `readinessProbe` succeeded!*
 
+    > [!NOTE]
+    > **About `Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice`:**
+    > On Kubernetes 1.33+, running `kubectl get endpoints` prints this deprecation warning because Kubernetes now uses `EndpointSlice` (`kubectl get endpointslices`) under the hood for large-scale performance. Be on the lookout for this warning so it doesn't catch you off guard—it is completely benign, and `kubectl get endpoints` (or `kubectl get ep`) is still what you'll use on the CKAD exam (`EndpointSlice` is not tested on CKAD).
+
 3.  **Trigger a Readiness Failure (Traffic Shedding without Restart):**
     Remove `/tmp/ready` inside the container so the `readinessProbe` fails while Nginx keeps running:
     ```bash

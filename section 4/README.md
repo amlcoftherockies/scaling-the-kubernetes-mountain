@@ -665,9 +665,15 @@ Whenever a Pod matching the Service selector is created, destroyed, or fails a r
     ```
     *Output will look similar to:*
     ```text
+    Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
     NAME              ENDPOINTS                                   AGE
     nginx-clusterip   10.244.1.8:80,10.244.1.9:80,10.244.1.10:80   5m
     ```
+
+    > [!NOTE]
+    > **Why do you see `Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice`?**
+    > Starting in Kubernetes 1.33+, the legacy `v1 Endpoints` API (which stored all Pod IPs for a Service inside a single object and hit performance bottlenecks on massive clusters with thousands of Pods) is officially deprecated in favor of **`EndpointSlice` (`discovery.k8s.io/v1`)**, which shards endpoints into smaller slices of up to 100 IPs (`kubectl get endpointslices -l kubernetes.io/service-name=nginx-clusterip`).
+    > **Be on the lookout for this warning**, as it's normal on modern clusters, **but don't worry about `EndpointSlice` for the CKAD exam**—`kubectl get endpoints` (or `kubectl get ep`) still works everywhere and remains the fastest way to verify Service-to-Pod routing during the exam!
 
 3.  **Hands-On Demonstration of Dynamic Endpoints**:
     Let's watch how scaling changes our endpoints in real-time.
