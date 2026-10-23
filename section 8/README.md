@@ -250,6 +250,51 @@ In our multi-tenant workshop cluster, you are allowed to create **`Role`s** and 
 
 ---
 
+### 2.4 Cloud Security Deep-Dive: Cloud Metadata Servers (`169.254.169.254`), Node IAM Theft, and Workload Identity
+
+So far we've seen how a Kubernetes `ServiceAccount` authenticates a Pod to the **Kubernetes API Server**. But what happens when a Pod running in the cloud (like a Kubeflow training job or an AI agent) needs to read a dataset from **Google Cloud Storage (GCS) / AWS S3** or call **Vertex AI / Bedrock**?
+
+#### 1. The Classic Cloud Vulnerability: Unprotected Node Metadata Servers (`169.254.169.254`)
+Every cloud VM (GCP Compute Engine, AWS EC2, Azure VM, OCI Compute) exposes a link-local **Instance Metadata Service (IMDS)** at **`http://169.254.169.254`** (`http://metadata.google.internal` on GCP) that hands out temporary cloud IAM credentials for the **underlying worker node VM**.
+*   **The Risk:** On a naively configured cluster, *every Pod scheduled on that worker node* can reach `169.254.169.254` over the network!
+*   If an attacker exploits a **Server-Side Request Forgery (SSRF)** vulnerability in a web app—or runs code inside a shared Jupyter notebook—they can query `http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token` and **steal the worker node's own Cloud IAM token** (which often has broad permissions to pull images, mount disks, or read cloud buckets across the project!).
+*   *(The old workaround—creating long-lived Cloud IAM JSON keys and storing them in Kubernetes `Secret`s—is also an anti-pattern because static keys never expire and frequently leak).*
+
+#### 2. The Modern Solution: Intercepting Metadata with Workload Identity (`gke-metadata-server`)
+Modern production clusters solve both problems using **Workload Identity Federation** (**GKE Workload Identity** on GCP, **IRSA / EKS Pod Identity** on AWS, **Azure Workload Identity** on AKS):
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│ Pod (serviceAccountName: ml-trainer-sa)                                   │
+│   Annotated with: iam.gke.io/gcp-service-account: trainer@proj.iam...     │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      │ Cloud SDK requests token from
+                                      │ http://169.254.169.254 (IMDS)
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ gke-metadata-server DaemonSet (Runs on every worker node in kube-system)  │
+│   1. Intercepts 169.254.169.254 traffic BEFORE it hits the Node VM IMDS!  │
+│   2. Looks up the calling Pod IP ──► Kubernetes ServiceAccount identity   │
+│   3. Exchanges K8s OIDC JWT with Cloud IAM for a short-lived cloud token  │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│ Result: Pod receives ONLY its own least-privilege Cloud IAM token         │
+│         (or NO cloud permissions at all if unannotated!).                 │
+│         The underlying worker node's VM IAM credentials are never exposed!│
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 3. Hands-On: Inspect `gke-metadata-server` Protecting Our Workshop Cluster
+Check the `kube-system` namespace on our cluster—you can see the **`gke-metadata-server`** `DaemonSet` running on every single worker node:
+```bash
+kubectl get daemonset gke-metadata-server -n kube-system
+kubectl get pods -n kube-system -l k8s-app=gke-metadata-server -o wide
+```
+*Because `gke-metadata-server` intercepts all Pod requests to `169.254.169.254` and your namespace's `ServiceAccount`s are not bound to any Google Cloud IAM role, our workshop Pods have **zero** access to the underlying Google Cloud project or node VM credentials—even though they run on GKE VMs!*
+
+---
+
 ## 🔒 Module 3: NetworkPolicies for Application Isolation
 
 By default in Kubernetes, **all Pods can talk to all other Pods** unless restricted by a **`NetworkPolicy`**.
