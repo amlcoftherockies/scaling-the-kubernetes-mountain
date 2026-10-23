@@ -95,12 +95,21 @@ CMD ["./app"]
 ---
 
 ### 1.4 Building and Inspecting the OCI Image Locally
-Workshop worker nodes are **x86_64** (GKE `e2`, OKE `E5`). An image only runs on the CPU architecture it was built for, so always build for `linux/amd64`:
+Workshop worker nodes are **x86_64** (GKE `e2`, OKE `E5`). An image only runs on the CPU architecture it was built for, so always build for `linux/amd64`.
+
+> [!IMPORTANT]
+> Make sure you are in the `section 6` directory before running the build, and pass `app` (or `cd app` first) as the build context directory—otherwise Docker won't find the `Dockerfile` and the build will fail with `failed to read dockerfile: open Dockerfile: no such file or directory`.
+
+From the `section 6` directory, build the image using the `app/` folder as the build context:
 
 ```bash
-cd "section 6/app"
-docker buildx build --platform linux/amd64 -t ckad-app:1.0 --load .
+# If you are at the repo root or in section 5, move into section 6 first:
+# cd "section 6"
+
+docker buildx build --platform linux/amd64 -t ckad-app:1.0 --load app
 ```
+
+*(Alternatively, if you `cd app` first, run `docker buildx build --platform linux/amd64 -t ckad-app:1.0 --load .`—just remember to `cd ..` back to `section 6` before applying `manifests/` in Module 3!)*
 
 **Inspect the resulting OCI image size, layers, and metadata:**
 ```bash
@@ -308,9 +317,9 @@ spec:
 2. Delete and recreate the pod. Observe the start time is near-instant because the node skipped downloading the image layers from the registry.
 
 ##### Test 2: Overwriting Tags (The Danger of Mutable Tags + `IfNotPresent`)
-1. Re-build your application with a slight change (e.g. edit `main.go` to print "Hello v2" instead) and push it under the **same tag**. Remember `--platform linux/amd64`:
+1. Re-build your application with a slight change (e.g. edit `app/main.go` to print "Hello v2" instead) and push it under the **same tag**. Remember `--platform linux/amd64` and to point the build context at `app` (or run from inside `app/` with `.`):
    ```bash
-   docker buildx build --platform linux/amd64 -t $IMAGE:2h --push .
+   docker buildx build --platform linux/amd64 -t $IMAGE:2h --push app
    ```
 2. Re-deploy the Pod. Because the node already has that tag cached, and its policy is `IfNotPresent`, the node **will not pull** the new image. Your Pod will run the old "v1" code, demonstrating the danger of tag mutation.
 
