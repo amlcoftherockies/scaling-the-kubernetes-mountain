@@ -182,6 +182,12 @@ kubectl exec nginx-multi -c web-server -- wget -qO- http://localhost:80
 ##### Pattern B: Init Containers ([pod-init.yaml](manifests/pod-init.yaml))
 If an Init Container fails, Kubernetes restarts it until it succeeds (unless `restartPolicy: Never`). If a Pod has multiple `initContainers`, they run **one at a time in order**, and the main app container only starts after every Init Container exits `0`.
 
+> [!TIP]
+> **Real-World Spotlight: Istio Service Mesh (`istio-init` + `istio-proxy`)**
+> **Istio** is one of the most famous (and infamous!) real-world examples of combining **both** an **Init Container** and a **Sidecar** in every Pod:
+> 1. **`istio-init` (Init Container)**: Runs first with elevated network admin (`NET_ADMIN`) privileges to program `iptables` rules inside the Pod's network namespace, redirecting all inbound and outbound TCP traffic to port `15001`/`15006`—and then exits `0`.
+> 2. **`istio-proxy` (Envoy Sidecar)**: Runs alongside your main application container for the lifetime of the Pod, intercepting that redirected traffic to handle mutual TLS (mTLS), retries, telemetry, and traffic routing automatically!
+
 Review and apply [pod-init.yaml](manifests/pod-init.yaml):
 ```bash
 kubectl apply -f manifests/pod-init.yaml
