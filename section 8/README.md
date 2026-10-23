@@ -8,8 +8,9 @@ Welcome to Section 8! Together with [Section 5, Module 1 (ConfigMaps, Secrets, E
 In this section, you will practice:
 1.  **Pod Security Standards (PSS) & PodSecurityPolicies**: Understanding `privileged`, `baseline`, and `restricted` enforcement levels, and inspecting your namespace's active Pod Security Admission labels.
 2.  **Pod & Container `SecurityContext`**: Running containers as a non-root user (`runAsNonRoot`, `runAsUser`, `fsGroup`), locking down the root filesystem (`readOnlyRootFilesystem`), dropping Linux capabilities (`drop: ["ALL"]`), and eliminating `PodSecurity` warnings.
-3.  **ServiceAccounts & Role-Based Access Control (RBAC)**: Creating `ServiceAccount`s, controlling token auto-mounting (`automountServiceAccountToken`), inspecting `Role`s / `RoleBinding`s, and testing permissions with `kubectl auth can-i`.
+3.  **ServiceAccounts, RBAC & Cloud Workload Identity**: Creating `ServiceAccount`s, controlling token auto-mounting (`automountServiceAccountToken`), creating custom `Role`s / `RoleBinding`s, and protecting cloud metadata servers (`169.254.169.254`) with `gke-metadata-server`.
 4.  **NetworkPolicies for Application Isolation**: Enforcing zero-trust microsegmentation between Pods (`podSelector`, `namespaceSelector`, `ipBlock`, `Ingress` & `Egress` rules).
+5.  **Resource Governance, Taints/Tolerations & `kube-scheduler`**: Understanding `requests` vs. `limits`, `LimitRange`, `ResourceQuota`, node taints/tolerations (including the `nvidia-gpu-device-plugin` `DaemonSet`), and how `kube-scheduler` places Pods.
 
 ---
 
@@ -450,7 +451,7 @@ Instead, `kube-scheduler` treats every node like a reservation ledger based stri
     *   **`Requests` column**: The exact sum of `resources.requests` of all Pods currently scheduled on that node. **If `New Pod Request + Allocated Requests > Node Allocatable`, `kube-scheduler` will NOT place the Pod on this node!**
     *   **`Limits` column**: Can exceed `100%` (overcommitment), because not every Pod bursts to its ceiling at the exact same millisecond.
 
-2.  **Inspect Node Labels & Taints (Why Normal Pods Never Land on the `gvisor` Node!):**
+2.  **Inspect Node Labels & Taints (Protecting `gvisor` and NVIDIA GPU Nodes!):**
     In Phase 1 (`Filtering`), `kube-scheduler` checks **Node Labels** (`nodeSelector` / `nodeAffinity`) and **Node Taints** (`tolerations`):
     ```bash
     # View node labels (machine type, zone, OS, and sandbox runtime):
@@ -459,7 +460,27 @@ Instead, `kube-scheduler` treats every node like a reservation ledger based stri
     # Inspect the Taint on our gVisor node:
     kubectl describe node -l sandbox.gke.io/runtime=gvisor | grep -E "Name:|Taints:"
     ```
-    *Notice `Taints: sandbox.gke.io/runtime=gvisor:NoSchedule`! That `NoSchedule` taint repels all ordinary Pods so general workloads don't accidentally consume the sandbox node pool (or expensive GPU nodes like `nvidia.com/gpu=present:NoSchedule`). Only Pods with a matching **toleration** and **nodeSelector** are scheduled there!*
+    *Notice `Taints: sandbox.gke.io/runtime=gvisor:NoSchedule`! That `NoSchedule` taint repels all ordinary Pods so general workloads don't accidentally consume the sandbox node pool. Only Pods with a matching **toleration** and **nodeSelector** are scheduled there!*
+
+    > [!TIP]
+    > **Famous AI/ML Example: Protecting GPU Nodes with Taints & the `nvidia-gpu-device-plugin` `DaemonSet`**
+    > How does Kubernetes know a node has an NVIDIA GPU (`nvidia.com/gpu: 1`), and how do you stop a cheap Nginx or Redis Pod from landing on a `$30/hr` NVIDIA H100/A100 GPU VM?
+    > 1. **Tainting the GPU Node Pool (`nvidia.com/gpu=present:NoSchedule`):** When you add a GPU node pool in GKE/EKS/AKS, the cloud provider automatically taints every GPU node with `nvidia.com/gpu=present:NoSchedule`. Any ordinary CPU Pod without a matching `toleration` is immediately repelled during `kube-scheduler` Phase 1 (`Filtering`).
+    > 2. **Exposing the GPU via the `nvidia-gpu-device-plugin` `DaemonSet`:** Standard Kubernetes doesn't natively know what a GPU is. Instead, a specialized **`nvidia-gpu-device-plugin` `DaemonSet`** in `kube-system` has both:
+    >    * A **`nodeAffinity`** targeting only nodes with the GPU hardware label (`cloud.google.com/gke-accelerator`), and
+    >    * A **`toleration`** for `NoSchedule` so it is allowed onto the tainted GPU nodes!
+    >    Once scheduled on a GPU node, that `DaemonSet` Pod talks to the local NVIDIA driver and registers `nvidia.com/gpu` in the node's **`Allocatable`** ledger so AI/ML Pods can request `resources.limits: {"nvidia.com/gpu": 1}`!
+    >
+    > **Inspect the pre-installed `nvidia-gpu-device-plugin` `DaemonSet`s in our cluster's `kube-system` namespace:**
+    > ```bash
+    > # List the NVIDIA GPU and Google TPU device plugin DaemonSets in kube-system:
+    > kubectl get daemonset -n kube-system | grep -E "NAME|nvidia|tpu"
+    >
+    > # Inspect the nodeAffinity (requires gke-accelerator) and tolerations (tolerates NoSchedule) on the plugin:
+    > kubectl get daemonset nvidia-gpu-device-plugin-small-cos -n kube-system \
+    >   -o jsonpath='NodeAffinity: {.spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0]}{"\nTolerations:  "}{.spec.template.spec.tolerations}{"\n"}'
+    > ```
+    > *Notice `DESIRED: 0` right now because our cluster has no GPU VMs attached—the moment a GPU node boots with `cloud.google.com/gke-accelerator`, this `DaemonSet` tolerates the node's taint, lands on the node, and unlocks `nvidia.com/gpu` scheduling!*
 
 3.  **Inspect the active `LimitRange` and `ResourceQuota` in your namespace:**
     ```bash
