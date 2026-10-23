@@ -177,13 +177,42 @@ Path: /v1│                  │Path: /v2
 
 ## 🚀 Module 4: Modern L7 Routing with the Gateway API (`HTTPRoute`)
 
-The **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) is the modern successor to `Ingress`. It splits responsibilities cleanly between:
-*   **Platform Admins**: Manage the **`GatewayClass`** (`traefik`) and the shared **`Gateway`** (`lab-gateway` in namespace `lab-ingress`).
-*   **Application Developers (You!)**: Create **`HTTPRoute`** resources in your own namespace and attach them to the shared `Gateway` via `parentRefs`.
+### 4.1 The Purpose of Gateway API & Key Evolutionary Differences
 
-Unlike `Ingress` (which needed vendor-specific annotations for header matching, traffic splitting, or rewrites), **`HTTPRoute` supports header routing, query matching, URL rewrites, and weighted canary traffic splitting natively in standard Kubernetes YAML!**
+The **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) was built to standardize advanced traffic routing across the Kubernetes ecosystem. It replaces the reliance on custom, vendor-specific `Ingress` annotations with a highly expressive, natively extensible set of Custom Resource Definitions (CRDs).
 
-### 4.1 Hands-On: Header Routing & Weighted Traffic Splitting with `HTTPRoute`
+#### Key Evolutionary Differences from `Ingress`:
+
+1.  **Role-Oriented Architecture**: Gateway API splits configuration across three distinct organizational roles:
+    *   **Infrastructure Providers** manage the **`GatewayClass`** (defining the underlying controller/load-balancer implementation, such as `traefik`, `gke-l7-global-external-managed`, or `istio`).
+    *   **Cluster Operators / Platform Admins** configure the **`Gateway`** (provisioning shared entry points, listeners, ports, and TLS certificates—like `lab-gateway` in namespace `lab-ingress`).
+    *   **Application Developers (You!)** independently define **`HTTPRoute`**, **`GRPCRoute`**, or **`TCPRoute`** resources in their own namespace and attach them to the shared `Gateway` via `parentRefs`.
+2.  **Native Expressiveness**: Advanced capabilities like **weighted traffic splitting** for canary deployments, **HTTP header matching/modifications**, query parameter matching, URL rewrites, and **request mirroring** are built directly into the core API spec—removing the need for non-portable vendor annotations (`nginx.ingress.kubernetes.io/...`).
+3.  **Multi-Protocol Support**: While `Ingress` is strictly limited to HTTP and HTTPS, Gateway API natively supports a wide range of protocols—including **HTTP/HTTPS (`HTTPRoute`), gRPC (`GRPCRoute`), TCP (`TCPRoute`), UDP (`UDPRoute`), and TLS passthrough (`TLSRoute`)**—providing a unified routing standard for all traffic types.
+
+```text
+┌───────────────────────────┐   ┌──────────────────────────────────────────┐
+│  ORGANIZATIONAL ROLE      │   │  GATEWAY API RESOURCE                    │
+├───────────────────────────┤   ├──────────────────────────────────────────┤
+│  Infrastructure Provider  │──►│  GatewayClass (name: traefik)            │
+│                           │   └────────────────────┬─────────────────────┘
+│                           │                        ▲
+│  Cluster Operator / Admin │──►┌────────────────────┴─────────────────────┐
+│  (namespace: lab-ingress) │   │  Gateway (name: lab-gateway, port 80/443)│
+│                           │   └────────────────────┬─────────────────────┘
+│                           │                        ▲ parentRefs
+│  Application Developer    │──►┌────────────────────┴─────────────────────┐
+│  (your namespace)         │   │  HTTPRoute / GRPCRoute / TCPRoute        │
+└───────────────────────────┘   └──────────┬────────────────────┬──────────┘
+                                  75% /v1  ▼                    ▼ 25% /v2 (or X-Canary)
+                                ┌────────────────────┐ ┌────────────────────┐
+                                │  Service: v1-svc   │ │  Service: v2-svc   │
+                                └────────────────────┘ └────────────────────┘
+```
+
+---
+
+### 4.2 Hands-On: Header Routing & Weighted Traffic Splitting with `HTTPRoute`
 
 1.  **Inspect the cluster's `GatewayClass` and shared `Gateway`:**
     ```bash
