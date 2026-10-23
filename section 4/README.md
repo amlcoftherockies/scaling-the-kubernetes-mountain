@@ -768,24 +768,6 @@ kubectl port-forward svc/nginx-clusterip 8080:80
 
 Because Kubernetes **Services** route traffic to Pods dynamically using **label selectors**, you can implement **Blue-Green** and **Canary** releases natively using standard Deployments and Services (often tested on the CKAD exam!).
 
-```mermaid
-flowchart TD
-    subgraph BG["Blue-Green Strategy (Instant Cutover)"]
-        SVC_BG["Service: bg-service\nselector: app=bg-demo, version=green"]
-        BLUE["Deployment: web-blue\n(version=blue, 2 pods)"]
-        GREEN["Deployment: web-green\n(version=green, 2 pods)"]
-        SVC_BG -. "0% (standby for instant rollback)" .-> BLUE
-        SVC_BG ==>|"100% traffic"| GREEN
-    end
-
-    subgraph CAN["Canary Strategy (Proportional Traffic Split)"]
-        SVC_CAN["Service: canary-service\nselector: app=canary-demo"]
-        STABLE["Deployment: web-stable\n(track=stable, 3 pods)"]
-        CANARY["Deployment: web-canary\n(track=canary, 1 pod)"]
-        SVC_CAN ==>|"~75% (3/4 endpoints)"| STABLE
-        SVC_CAN -->|"~25% (1/4 endpoints)"| CANARY
-    end
-```
 
 #### Strategy A: Blue-Green Deployment ([blue-green.yaml](manifests/blue-green.yaml))
 In a **Blue-Green** release, you run two full environments side-by-side: **Blue** (`v1.0`, currently serving live traffic) and **Green** (`v2.0`, staged and verified). Once Green is ready, you flip the Service's label selector from `version: blue` to `version: green` for an **instant, zero-downtime cutover**.
