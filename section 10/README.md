@@ -19,9 +19,9 @@ Real-world Kubernetes applications (like Redis, PostgreSQL, Prometheus, or multi
 *   **How Helm 3 works inside a single namespace:** Helm v3 has **no server-side daemon** (unlike legacy Helm v2's `Tiller`). It uses your existing `KUBECONFIG` and stores release history as regular Kubernetes Secrets (`type: helm.sh/release.v1`) right inside your namespace!
 
 ```mermaid
-flowchart LR
-    Repo["Helm Repo / OCI Registry\n(Chart: templates/ + default values.yaml)"] --> CLI["helm install / upgrade\n+ custom podinfo-values.yaml"]
-    CLI -->|"Renders YAML & applies via KUBECONFIG"| NS["Your Namespace\n• Deployment & Service\n• Secret: sh.helm.release.v1.my-app.v1"]
+flowchart TD
+    Repo["<b>1. Helm Repo / OCI Registry</b><br/>Chart: templates/ + default values.yaml"] --> CLI["<b>2. Helm CLI (helm install / upgrade)</b><br/>Merges your custom podinfo-values.yaml"]
+    CLI -->|"Renders YAML & applies via KUBECONFIG"| NS["<b>3. Your Namespace</b><br/>• Deployment & Service<br/>• Release Secret: sh.helm.release.v1.my-app.v1"]
 ```
 
 ---
@@ -111,9 +111,9 @@ Unlike Helm (which uses Go `{{ .Values.foo }}` templates), **Kustomize** is buil
 
 ```mermaid
 flowchart TD
-    Base["kustomize/base/\n• kustomization.yaml\n• deployment.yaml\n• service.yaml\n• configMapGenerator"]
-    Dev["kustomize/overlays/dev/\n• namePrefix: dev-\n• replicas: 1\n• LOG_LEVEL=debug"]
-    Prod["kustomize/overlays/prod/\n• namePrefix: prod-\n• replicas: 3\n• LOG_LEVEL=warn\n• patch-resources.yaml"]
+    Base["<b>kustomize/base/</b><br/>• kustomization.yaml<br/>• deployment.yaml & service.yaml<br/>• configMapGenerator"]
+    Dev["<b>kustomize/overlays/dev/</b><br/>• namePrefix: dev-<br/>• replicas: 1<br/>• LOG_LEVEL=debug"]
+    Prod["<b>kustomize/overlays/prod/</b><br/>• namePrefix: prod-<br/>• replicas: 3<br/>• LOG_LEVEL=warn + patch-resources.yaml"]
     Base --> Dev
     Base --> Prod
 ```
@@ -179,10 +179,10 @@ Kubernetes doesn't only manage built-in objects like `Pod`s and `Deployment`s. A
 ### 3.1 The Operator Pattern & Why Cluster Scope vs. Namespace Scope Matters
 
 ```mermaid
-flowchart LR
-    Admin["Platform Admin\n(Cluster Scope)"] -->|"1. Installs CRD & Operator Controller\n(e.g. Gateway API, Prometheus Operator, Spark Operator)"| API["Kubernetes API Server\nNew Kind: PodMonitoring / HTTPRoute"]
-    Dev["App Developer (You!)\n(Namespace Scope)"] -->|"2. kubectl apply Custom Resource (CR)\nin your own namespace"| API
-    API -->|"3. Watch loop"| Op["Operator Controller Pod\nReconciles actual state"]
+flowchart TD
+    Admin["<b>Platform Admin (Cluster Scope)</b>"] -->|"1. Installs CRD & Operator Controller<br/>(Gateway API, Prometheus Operator, Kubeflow)"| API["<b>Kubernetes API Server</b><br/>Registers New Kind:<br/>HTTPRoute / PodMonitoring"]
+    Dev["<b>App Developer — You! (Namespace Scope)</b>"] -->|"2. kubectl apply Custom Resource (CR)<br/>inside your namespace"| API
+    API -->|"3. Watch & Reconcile Loop"| Op["<b>Operator Controller Pod</b><br/>Configures Traefik / Prometheus scraper"]
 ```
 
 *   **Installing an Operator** (registering the `CRD` and `ClusterRole`) is a **cluster-admin** task done once per cluster.

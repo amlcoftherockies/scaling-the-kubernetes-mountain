@@ -26,10 +26,10 @@ When deploying applications to Kubernetes, your cluster nodes do **not** run Doc
 The **Open Container Initiative (OCI)** (under the Linux Foundation) defines three vendor-neutral specifications that decouple *building* containers from *storing* and *running* them:
 
 ```mermaid
-flowchart LR
-    Build["docker buildx build\n(or Podman / Buildah / Kaniko)"] -->|"1. OCI Image Spec\n(Manifest + Config JSON + Tar Layers)"| Reg["Container Registry\n(Docker Hub / ttl.sh / GAR)"]
-    Reg -->|"2. OCI Distribution Spec\n(HTTP/V2 Pull by Tag or SHA256 Digest)"| CRI["Node CRI (containerd / CRI-O)\nUnpacks RootFS + config.json"]
-    CRI -->|"3. OCI Runtime Spec\n(runc or gVisor runsc)"| Kernel["Linux Container\n(cgroups + namespaces)"]
+flowchart TD
+    Build["<b>1. Image Build</b><br/>docker buildx build<br/>(or Podman / Buildah / Kaniko)"] -->|"OCI Image Spec<br/>(Manifest + Config JSON + Tar Layers)"| Reg["<b>2. Container Registry</b><br/>(Docker Hub / ttl.sh / GAR)"]
+    Reg -->|"OCI Distribution Spec<br/>(HTTP V2 Pull by Tag or SHA256 Digest)"| CRI["<b>3. Node CRI Runtime</b><br/>(containerd / CRI-O)<br/>Unpacks RootFS + config.json"]
+    CRI -->|"OCI Runtime Spec<br/>(runc or gVisor runsc)"| Kernel["<b>4. Linux Container</b><br/>(cgroups + namespaces)"]
 ```
 
 1.  **OCI Image Specification**: Defines what a container image actually is on disk—not a single monolithic VM file, but a **JSON Manifest** pointing to an **Image Configuration JSON** (`Architecture`, `Env`, `Cmd`, `User`) and an ordered stack of **read-only `.tar.gz` filesystem layers** addressed by their `sha256:` content hash.
@@ -359,10 +359,10 @@ spec:
 The **Container Runtime Interface (CRI)** is the API standard that allows the Kubernetes `kubelet` agent on each node to communicate with the active container runtime (like `containerd`, or `CRI-O` on your OKE nodes).
 
 ```mermaid
-graph TD
-    Kubelet[Kubelet Node Agent] -->|gRPC / CRI API| CRI[CRI Runtime <br> containerd or CRI-O]
-    CRI -->|Default / runc handler| runc[runc <br> Standard Linux Sandbox]
-    CRI -->|Sandboxed / runsc handler| runsc[gVisor runsc <br> Kernel Interceptor Sandbox]
+flowchart TD
+    Kubelet["<b>Kubelet Node Agent</b>"] -->|"gRPC / CRI API"| CRI["<b>CRI Runtime</b><br/>(containerd or CRI-O)"]
+    CRI -->|"Default handler: runc"| runc["<b>runc</b><br/>Standard Linux Sandbox<br/>(Shared Host Kernel)"]
+    CRI -->|"Sandboxed handler: runsc"| runsc["<b>gVisor (runsc)</b><br/>User-Space Kernel Sandbox<br/>(Isolated from Host Kernel)"]
 ```
 
 By default, the runtime runs pods using **`runc`**, which isolates containers using standard Linux Namespaces and Cgroups. However, all containers on the node share the same host Linux Kernel. If a container breaks out (privilege escalation), it can compromise the whole node.

@@ -99,10 +99,10 @@ In Kubernetes, human users and automated processes authenticate differently, but
 ### 2.1 How RBAC Works (`Role`, `ClusterRole`, `RoleBinding`, `ClusterRoleBinding`)
 
 ```mermaid
-flowchart LR
-    SA["Subject\n(ServiceAccount / User / Group)"] --> RB["RoleBinding (Namespaced)\nor ClusterRoleBinding (Cluster-wide)"]
-    RB --> R["Role (Namespaced rules)\nor ClusterRole (Reusable rules)"]
-    R --> API["API Resources & Verbs\n(pods, secrets, deployments: get, list, watch, create...)"]
+flowchart TD
+    SA["<b>Subject (Who)</b><br/>ServiceAccount / User / Group"] --> RB["<b>Binding (Where)</b><br/>RoleBinding (Single Namespace)<br/>or ClusterRoleBinding (Cluster-wide)"]
+    RB --> R["<b>Role (What Rules)</b><br/>Role (Namespaced rules)<br/>or ClusterRole (Reusable / Cluster rules)"]
+    R --> API["<b>Target API Resources & Verbs</b><br/>Resources: pods, secrets, deployments...<br/>Verbs: get, list, watch, create, delete..."]
 ```
 
 | Object | Scope | Purpose |
@@ -244,8 +244,8 @@ By default in Kubernetes, **all Pods can talk to all other Pods** unless restric
 
 ```mermaid
 flowchart LR
-    FE["Pod: frontend-client\n(label: role=frontend)"] ==>|"Allowed (unrestricted)"| BE["Service: backend-svc\n(app=backend-api)"]
-    INT["Pod: intruder-client\n(label: role=untrusted)"] -.->|"DROPPED by Egress NetworkPolicy\nrestrict-intruder-egress"| BE
+    FE["<b>Pod: frontend-client</b><br/>label: role=frontend"] ==>|"ALLOWED<br/>(Unrestricted)"| BE["<b>Service: backend-svc</b><br/>app=backend-api"]
+    INT["<b>Pod: intruder-client</b><br/>label: role=untrusted"] -.->|"DROPPED by Egress NetworkPolicy<br/>(restrict-intruder-egress)"| BE
 ```
 
 > [!NOTE]

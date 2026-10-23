@@ -21,9 +21,9 @@ On the CKAD exam, applications often listen on non-standard ports (like `8080`, 
 
 ```mermaid
 flowchart LR
-    Client["Cluster Client"] -->|"1. Service port: 80\n(or 8081)"| SVC["Service: multi-port-svc\n• name: web (80 -> http-api)\n• name: admin (8081 -> 9090)"]
-    SVC -->|"2. targetPort: http-api (8080)"| C1["Container: app-api\ncontainerPort: 8080 (name: http-api)"]
-    SVC -->|"2. targetPort: 9090"| C2["Container: admin-diag\ncontainerPort: 9090 (name: http-admin)"]
+    Client["<b>Cluster Client</b>"] -->|"Service port: 80<br/>or 8081"| SVC["<b>Service: multi-port-svc</b><br/>• name: web (80 → http-api)<br/>• name: admin (8081 → 9090)"]
+    SVC -->|"targetPort: http-api (8080)"| C1["<b>Container: app-api</b><br/>containerPort: 8080<br/>(name: http-api)"]
+    SVC -->|"targetPort: 9090"| C2["<b>Container: admin-diag</b><br/>containerPort: 9090<br/>(name: http-admin)"]
 ```
 
 *   **`port` (Service Port)**: The virtual TCP/UDP port exposed on the Service's `ClusterIP` (what clients call, e.g., `http://my-svc:80`).
@@ -107,9 +107,9 @@ While a `LoadBalancer` Service operates at **Layer 4 (TCP/UDP)** and requires a 
 
 ```mermaid
 flowchart LR
-    Browser["Internet Client\ncurl http://<ns>.amlcoftherockies.net/..."] -->|"DNS *.amlcoftherockies.net\n-> 136.80.107.173"| Traefik["Shared Traefik Ingress / Gateway\n(namespace: lab-ingress)"]
-    Traefik -->|"Path: /v1"| V1["Service: v1-svc (:80)\n-> Deployment app-v1 (:5678)"]
-    Traefik -->|"Path: /v2"| V2["Service: v2-svc (:80)\n-> Deployment app-v2 (:5678)"]
+    Browser["<b>Internet Client</b><br/>http://&lt;ns&gt;.amlcoftherockies.net"] -->|"DNS *.amlcoftherockies.net<br/>(136.80.107.173)"| Traefik["<b>Shared Traefik Ingress / Gateway</b><br/>(namespace: lab-ingress)"]
+    Traefik -->|"Path: /v1"| V1["<b>Service: v1-svc (:80)</b><br/>→ Deployment app-v1 (:5678)"]
+    Traefik -->|"Path: /v2"| V2["<b>Service: v2-svc (:80)</b><br/>→ Deployment app-v2 (:5678)"]
 ```
 
 ### 3.1 Key `Ingress` Concepts for CKAD

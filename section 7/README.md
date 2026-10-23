@@ -246,10 +246,10 @@ kubectl wait --for=condition=Ready pod/metrics-demo --timeout=60s
 On the CKAD exam, you will frequently be handed a broken Deployment or Service and asked to make it work. Use this **4-step systematic workflow** every time:
 
 ```mermaid
-flowchart LR
-    S1["1. kubectl get pods\nCheck STATUS & READY"] --> S2["2. kubectl describe pod\nRead Events & Probe/Image errors"]
-    S2 --> S3["3. kubectl logs [-p]\nCheck app crash output"]
-    S3 --> S4["4. kubectl get svc,ep\nVerify Service selector matches Pod labels"]
+flowchart TD
+    S1["<b>Step 1: Check Pod Status</b><br/>kubectl get pods<br/>(Inspect STATUS & READY columns)"] --> S2["<b>Step 2: Inspect Pod Events</b><br/>kubectl describe pod<br/>(Image pull, scheduling, or probe errors)"]
+    S2 --> S3["<b>Step 3: Check Container Logs</b><br/>kubectl logs &lt;pod&gt; [--previous]<br/>(Inspect app crash output)"]
+    S3 --> S4["<b>Step 4: Verify Service & Endpoints</b><br/>kubectl get svc,ep<br/>(Confirm Service selector matches Pod labels)"]
 ```
 
 ### 5.1 Deploy the Broken Application
