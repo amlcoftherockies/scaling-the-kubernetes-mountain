@@ -332,20 +332,27 @@ kubectl logs nginx-single --previous # Or -p
 ```
 
 #### 1.5.2 Multi-Container Pod Logs
-If a pod has more than one container, you **must** specify which container you want to query using the `-c` (or `--container`) flag. If you do not, the command will error.
+If a Pod has more than one container and you omit `-c`, modern `kubectl` automatically defaults to the **first container** defined in `spec.containers` (or the container named in the `kubectl.kubernetes.io/default-container` annotation) and prints a notice telling you which containers exist:
 
-Try running this:
 ```bash
-# This will fail and list the container names:
 kubectl logs nginx-multi
 ```
-Now, retrieve logs from each specific container:
+*Output:*
+```text
+Defaulted container "web-server" out of: web-server, content-generator
+...
+```
+
+To target a specific container explicitly (or view all containers at once), use `-c` (`--container`) or `--all-containers=true`:
 ```bash
-# View logs from the web server container
+# View logs from the web-server container explicitly
 kubectl logs nginx-multi -c web-server
 
 # View logs from the background content-generator sidecar
 kubectl logs nginx-multi -c content-generator
+
+# Stream logs from ALL containers in the Pod simultaneously
+kubectl logs nginx-multi --all-containers=true
 ```
 
 ---
