@@ -239,6 +239,20 @@ GKE nodes in the same project can pull without a Secret.
 
 ---
 
+### 2.5 Beyond Container Registries: Package Registries, Conda & Artifact Lineage in AI/ML
+
+While **container registries** govern the immutable base OS and runtime layers that Kubernetes pulls onto worker nodes, **package registries** (such as private Conda channels, Google Artifact Registry Python/Conda repositories, Artifactory, or Nexus) govern the libraries and binaries installed *inside* those containers—both during **automated CI image builds** and dynamically inside **live interactive notebooks**.
+
+In AI/ML engineering, locking down your container image tag or SHA256 digest is only half the battle if `pip install` or `conda install` pulls unverified, floating dependencies at build time or inside a running Jupyter notebook Pod.
+
+#### Why Package Registries & Conda Matter for CI, Live Notebooks, and Lineage:
+*   **Cross-Platform & Non-Python Binary Resolution (Conda)**: Conda is both a cross-platform package manager and an environment manager, and it is highly recommended for enforcing reproducible, validated dependency chains across data science builds and notebook environments. Unlike standard Python tools, Conda resolves and installs complex non-Python dependencies—such as C/C++ math libraries (`BLAS`/`LAPACK`) and GPU compute binaries like **CUDA** and **cuDNN**—which are foundational for heavy machine learning workloads.
+*   **Deterministic CI/CD Image Builds (`conda-lock`)**: For build pipelines, integrating Conda (often paired with `conda-lock`) ensures deterministic container images by generating strict, platform-specific dependency manifests (including exact package hashes). This locks down the exact versions of all transitive dependencies, preventing unexpected upstream package updates from breaking automated CI/CD workflows or production model deployments.
+*   **Securing Live Interactive Notebooks (Curated Private Channels)**: When configuring environments for data science teams—particularly in shared Kubernetes notebook platforms like **Kubeflow Notebooks**—Conda allows platform engineers to restrict package consumption (via `.condarc` or `pip.conf` mounted through a Kubernetes `ConfigMap`) to private, curated channels. This architecture forces users in live notebooks to draw exclusively from an internal registry of security-scanned, approved packages rather than pulling arbitrary code from public indexes (`pypi.org` or `anaconda.org`), effectively mitigating software supply chain risks (typosquatting, dependency confusion, and malicious post-install scripts) while still giving data scientists the specialized libraries they need.
+*   **End-to-End ML Lineage & Auditability**: True MLOps reproducibility requires full **artifact lineage**—being able to trace a deployed model in production back to the exact **container image digest** (`@sha256:...`), the exact **Git commit**, the training dataset version, *and* the exact **package lockfile / SBOM (Software Bill of Materials)** from your internal package registry. If a model exhibits drift or a zero-day CVE is discovered in a C++ or CUDA shared library, package + container lineage lets you immediately identify which training runs, notebook servers, and inference deployments are affected and rebuild them deterministically.
+
+---
+
 ## 🔒 Module 3: Mutable Tags vs. Immutable Content Digests
 
 When deploying Pods in Kubernetes, how you reference the image affects security and reproducibility.
@@ -360,6 +374,9 @@ For untrusted workloads (e.g. user-submitted code in a workshop), we use sandbox
 ### 4.1 Which Runtimes Does This Cluster Offer?
 
 A **RuntimeClass** maps a name you use in Pod specs to a runtime **handler** configured on the nodes. RuntimeClasses are cluster-scoped, so admins create them. You *use* them.
+
+> [!TIP]
+> **Real-World Pattern in AI/ML Infrastructure:** You will see this exact same architectural pattern—where platform admins define pre-configured, cluster-scoped "runtimes" and application developers simply reference them by name—in higher-level Kubernetes systems like **[Kubeflow Trainer](https://trainer.kubeflow.org/en/latest/overview/index.html)** (`TrainingRuntime` / `ClusterTrainingRuntime`), which abstracts distributed training setup behind reusable runtime definitions.
 
 ```bash
 kubectl get runtimeclass
