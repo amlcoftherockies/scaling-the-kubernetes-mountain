@@ -176,6 +176,54 @@ Kubernetes clusters run **Metrics Server**, a lightweight in-memory aggregator t
 
 ---
 
+### 3.2 Kubernetes Autoscaling (`HPA` vs. `Cluster Autoscaler`) & Inspecting `kube-system`
+
+Kubernetes scales workloads across **two complementary layers**, both powered by the metrics and scheduling signals we've explored:
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: HorizontalPodAutoscaler (HPA) — Scales POD Replicas              │
+│   Metrics Server (in kube-system) ──► HPA Controller ──► Scales replicas  │
+│   (e.g., if CPU > 50% of request, scale Deployment from 1 ──► 4 Pods)     │
+├───────────────────────────────────────────────────────────────────────────┤
+│ LAYER 2: Cluster Autoscaler (CA) — Scales WORKER NODE VMs                 │
+│   Unschedulable "Pending" Pods ──► Cluster Autoscaler ──► Adds Cloud VMs  │
+│   (When nodes are full and Pods go Pending, CA provisions a new Node!)    │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+1.  **Inspect `metrics-server` and the System Autoscalers running in `kube-system`:**
+    ```bash
+    kubectl get deployments,pods -n kube-system | grep -E "NAME|metrics-server|autoscaler"
+    ```
+    *You will see `metrics-server` (which feeds `kubectl top` and `HPA`), plus system autoscalers like `kube-dns-autoscaler` and `konnectivity-agent-autoscaler` that dynamically scale cluster DNS and control-plane proxies as the node count grows!*
+
+2.  **Inspect the Live `Cluster Autoscaler` Status in `kube-system`:**
+    In managed Kubernetes clusters like GKE, the **Cluster Autoscaler** runs inside the cloud provider's control plane (so a full cluster never prevents the autoscaler itself from scheduling!), and it publishes its real-time status to the **`cluster-autoscaler-status`** `ConfigMap` in `kube-system`:
+    ```bash
+    kubectl get configmap cluster-autoscaler-status -n kube-system -o yaml
+    ```
+    *Look at the `status` payload: you can see `autoscalerStatus: Running`, `clusterWide` health (`ready: 4`), `scaleUp` / `scaleDown` activity, and each node pool's `minSize` and `maxSize`!*
+
+3.  **Hands-On: Create a `HorizontalPodAutoscaler` (`HPA`) Imperatively (CKAD Skill):**
+    As long as a Deployment's containers define `resources.requests.cpu` (which our namespace's `LimitRange` injects automatically!), you can attach an `HPA` with a single command:
+    ```bash
+    # Create an HPA for probes-demo or any Deployment (or generate YAML with --dry-run=client -o yaml)
+    kubectl create deployment hpa-demo --image=docker.io/library/nginx:1.25-alpine
+    kubectl autoscale deployment hpa-demo --cpu-percent=50 --min=1 --max=4
+
+    # Inspect the HPA status and its target CPU utilization:
+    kubectl get hpa hpa-demo
+    kubectl describe hpa hpa-demo
+    ```
+    *Clean up the test deployment and HPA when done:*
+    ```bash
+    kubectl delete hpa hpa-demo
+    kubectl delete deployment hpa-demo
+    ```
+
+---
+
 ## 📈 Module 4: Collecting Metrics & Understanding Prometheus Basics
 
 While `kubectl top` only tracks current CPU and RAM, production cloud-native applications expose rich **application-level metrics** (request rate, error count, latency percentiles, queue depth) using the **Prometheus** exposition format.

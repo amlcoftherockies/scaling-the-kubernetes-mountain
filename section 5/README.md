@@ -276,7 +276,33 @@ Who created that PV? A **StorageClass**. It names a **provisioner** (a CSI drive
 
 ---
 
-### 3.2 Access Modes
+### 3.2 Inspecting the CSI Driver & `kube-system` Node DaemonSets
+
+How does Kubernetes actually talk to Google Cloud (or AWS/Oracle) to attach and mount a disk onto a worker node? Through the **Container Storage Interface (CSI)**!
+
+When `standard-rwo` says `Provisioner: pd.csi.storage.gke.io`, that string isn't built into the Kubernetes core binary—it is a **CSI Driver plugin** registered on the cluster and running as system Pods inside **`kube-system`**:
+
+1.  **List the CSI Drivers registered in the cluster and the CSI status of each worker node:**
+    ```bash
+    kubectl get csidrivers
+    kubectl get csinodes
+    ```
+    *You will see `pd.csi.storage.gke.io` (Google Persistent Disk), `filestore.csi.storage.gke.io` (Cloud Filestore NFS), and `podcertificate.gke.io`, along with all 4 worker nodes registered as `CSINode`s.*
+
+2.  **Inspect the CSI Driver `DaemonSet`s and `Pod`s running in `kube-system`:**
+    Because *every* worker node needs to be able to format (`mkfs.ext4`) and mount block volumes into container filesystems, the node portion of a CSI driver runs as a **`DaemonSet`** in `kube-system`:
+    ```bash
+    # View the CSI node DaemonSets in kube-system (pdcsi-node and filestore-node)
+    kubectl get daemonsets -n kube-system | grep -E "NAME|csi|filestore"
+
+    # View the CSI driver Pods running across every worker node
+    kubectl get pods -n kube-system -o wide | grep -E "NAME|pdcsi|filestore"
+    ```
+    *Notice how `pdcsi-node` runs 1 Pod per worker node (`3/3` containers: the CSI node-driver-registrar sidecar, the livenessprobe sidecar, and the `gce-pd-driver` plugin container that mounts disks onto the node)!*
+
+---
+
+### 3.3 Access Modes
 
 Kubernetes supports different access modes for volumes:
 *   **`ReadWriteOnce` (RWO)**: mounted read-write by a single **node**. This is standard block storage (Persistent Disk, OCI Block Volume, EBS).
@@ -286,7 +312,7 @@ Kubernetes supports different access modes for volumes:
 
 ---
 
-### 3.3 Storage Topology & Wait For First Consumer
+### 3.4 Storage Topology & Wait For First Consumer
 
 Cloud disks are **zonal** (Oracle calls zones *availability domains*). If a disk is created in zone A and the scheduler puts the Pod on a node in zone B, the disk can't attach and the Pod never starts.
 

@@ -293,9 +293,12 @@ check_allowed "Section 4: Read cluster Nodes (read-only)" \
 check_allowed "Section 5: Create ConfigMaps, Secrets, PVCs & StatefulSets" \
   "Missing PVC/ConfigMap/Secret permissions in ${NS}. Check RoleBinding in ${NS}." \
   create persistentvolumeclaims -n "$NS"
-check_allowed "Section 5: Read StorageClasses & PersistentVolumes (read-only)" \
-  "Cannot list StorageClasses. Run 'labctl-gke infra --apply' to update 'labctl-participant-cluster-read'." \
-  list storageclasses.storage.k8s.io
+check_allowed "Section 5: Read StorageClasses, PVs & CSI Drivers (read-only)" \
+  "Cannot list StorageClasses or CSIDrivers. Run 'labctl-gke infra --apply' to update 'labctl-participant-cluster-read'." \
+  list csidrivers.storage.k8s.io
+check_allowed "Section 5 & 7: Inspect kube-system Pods, DaemonSets & Autoscaler" \
+  "Cannot list Pods/DaemonSets in kube-system. Run 'labctl-gke infra --apply' to install 'labctl-kubesystem-reader'." \
+  list daemonsets.apps -n kube-system
 
 # Section 6: RuntimeClass
 check_allowed "Section 6: Read RuntimeClasses (gVisor inspection)" \
