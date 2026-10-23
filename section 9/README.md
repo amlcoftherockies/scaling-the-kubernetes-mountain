@@ -212,7 +212,12 @@ The **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) was built to sta
 
 ---
 
-### 4.2 Hands-On: Header Routing & Weighted Traffic Splitting with `HTTPRoute`
+### 4.2 Hands-On: Canary Rollouts (Header Routing & Weighted Traffic Splitting) with `HTTPRoute`
+
+> [!TIP]
+> **Why Gateway API Canary Beats Pod-Count Canary:**
+> With a standard Kubernetes `Service` (which load-balances evenly across matching Pods), achieving a `95% / 5%` canary split requires running **20 Pods** (`19` stable + `1` canary).
+> With **Gateway API `HTTPRoute`**, traffic splitting is controlled by **`backendRefs[*].weight`** at Layer 7 in the Gateway (Traefik). Even with **just 1 Pod** behind `v1-svc` and **1 Pod** behind `v2-svc`, you can split traffic `75% / 25%`, `99% / 1%`, or route internal QA testers via an HTTP header (`X-Canary: true`)—and promote or roll back instantaneously without scaling Pods!
 
 1.  **Inspect the cluster's `GatewayClass` and shared `Gateway`:**
     ```bash
@@ -221,27 +226,62 @@ The **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) was built to sta
     ```
 
 2.  **Review and apply [manifests/httproute-advanced.yaml](manifests/httproute-advanced.yaml):**
-     It defines two rules on your `MY_HOST` hostname:
-    *   **Rule 1 (Header Match)**: Requests carrying HTTP header `X-Canary: true` are routed **100% to `v2-svc`**.
-    *   **Rule 2 (Weighted Split)**: All other requests to `/` are split **75% to `v1-svc`** and **25% to `v2-svc`**.
+    It defines two canary rules on your `MY_HOST` hostname:
+    *   **Rule 1 (Header-Based Canary)**: Requests carrying HTTP header `X-Canary: true` are routed **100% to `v2-svc`**.
+    *   **Rule 2 (Weighted Canary Split)**: All other requests to `/` are split **75% to `v1-svc`** (`weight: 75`) and **25% to `v2-svc`** (`weight: 25`).
+    ```yaml
+    rules:
+    # Rule 1: Header-based Canary (QA / Internal testing -> 100% v2-svc)
+    - matches:
+      - headers:
+        - name: X-Canary
+          value: "true"
+      backendRefs:
+      - name: v2-svc
+        port: 80
+    # Rule 2: Progressive Weighted Canary (75% v1-svc / 25% v2-svc)
+    - matches:
+      - path:
+          type: PathPrefix
+          value: /
+      backendRefs:
+      - name: v1-svc
+        port: 80
+        weight: 75
+      - name: v2-svc
+        port: 80
+        weight: 25
+    ```
+    Apply the `HTTPRoute` on your live workshop hostname:
     ```bash
     sed "s/MY_HOST/${MY_HOST}/g" manifests/httproute-advanced.yaml | kubectl apply -f -
     kubectl get httproute app-httproute
     ```
 
-3.  **Test Weighted Traffic Splitting (`75% v1 / 25% v2`):**
+3.  **Test Weighted Canary Traffic Splitting (`75% v1 / 25% v2`):**
     Send 8 regular HTTP requests from your laptop:
     ```bash
     for i in 1 2 3 4 5 6 7 8; do curl -s http://${MY_HOST}/; done
     ```
     *You will see roughly 6 responses from `Backend v1 (Stable)` and 2 responses from `Backend v2 (New Release)`!*
 
-4.  **Test Header-Based Routing (`X-Canary: true`):**
+4.  **Test Header-Based Canary Routing (`X-Canary: true`):**
     Now pass `-H "X-Canary: true"` — every single request is deterministically routed to `Backend v2`:
     ```bash
     for i in 1 2 3 4; do curl -s -H "X-Canary: true" http://${MY_HOST}/; done
     ```
     *All 4 responses return `Served by Backend v2 (New Release)`!*
+
+5.  **Promote the Canary to 100% (`weight: 0` on `v1`, `weight: 100` on `v2`) Live:**
+    Once you are confident in `v2`, shift `100%` of production traffic to `v2-svc` (without restarting a single Pod!) by patching the weights on `app-httproute`:
+    ```bash
+    kubectl patch httproute app-httproute --type='json' \
+      -p='[{"op":"replace","path":"/spec/rules/1/backendRefs/0/weight","value":0},{"op":"replace","path":"/spec/rules/1/backendRefs/1/weight","value":100}]'
+
+    # Verify 100% of normal traffic now lands on Backend v2:
+    for i in 1 2 3 4; do curl -s http://${MY_HOST}/; done
+    ```
+    *All 4 regular requests now return `Served by Backend v2 (New Release)`—and if an alert fires, patching the weights back to `100 / 0` gives you an instant, zero-downtime rollback!*
 
 ---
 
