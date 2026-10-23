@@ -165,6 +165,20 @@ kubectl exec nginx-multi -c web-server -- wget -qO- http://localhost:80
 *You should see output similar to:*
 `Hello from the Sidecar Container! Time: Tue Oct 20 19:35:10 UTC 2026`
 
+> [!IMPORTANT]
+> **Understanding `emptyDir` vs. `hostPath` — and Why `emptyDir` is Risky for Stateful Workloads**
+> Notice that `nginx-multi` shares files using an **`emptyDir: {}`** volume. The core difference between `emptyDir` and `hostPath` comes down to **data lifecycle, node coupling, and security**:
+>
+> | Dimension | `emptyDir` (Pod-Scoped Ephemeral) | `hostPath` (Node-Coupled Host Disk) |
+> | :--- | :--- | :--- |
+> | **Data Lifecycle** | Created dynamically when a Pod is scheduled to a node and **permanently deleted** the moment the Pod is removed (though it *does* survive individual container restarts within the same Pod). | Mounts a pre-existing directory directly from the worker node's OS filesystem. If the Pod dies, the files remain on *that specific node's* disk. |
+> | **Security Risk** | Safe and isolated per Pod; allowed by `baseline` and `restricted` Pod Security profiles. | **High security risk** (blocked in our workshop by Pod Security `baseline`). A compromised Pod with `hostPath: /` can escape the container and take over the host node. |
+> | **Primary Use Case** | Scratch space, local caches, or sharing transient files between containers in the **same Pod** (like our sidecar!). | Reserved almost exclusively for privileged cluster `DaemonSet`s (e.g., Fluent Bit, Prometheus Node Exporter) that must read node `/var/log` or system metrics. |
+>
+> **⚠️ The Risk of Relying on `emptyDir` for Production or Stateful Workloads:**
+> 1. **Permanent Data Loss on Pod Rescheduling**: An `emptyDir` is tied to the **Pod's lifecycle**, not a persistent disk. Any routine Kubernetes event—a Deployment rolling update (`kubectl rollout`), a Pod eviction, a node drain, or `kubectl delete pod`—destroys the Pod and **wipes all data in `emptyDir` permanently**. Never store databases, user uploads, or model checkpoints in `emptyDir` (use a **`PersistentVolumeClaim` (`PVC`)**, which you will build in **[Section 5](../section%205/README.md)**!).
+> 2. **Node Disk Exhaustion & Eviction**: By default, `emptyDir` uses the worker node's local boot disk (or node RAM if `emptyDir.medium: Memory` is set). If a container writes unbounded logs or temp files to `emptyDir` without setting `emptyDir.sizeLimit`, it can fill up the node's ephemeral storage (`DiskPressure`) and cause the `kubelet` to **evict your Pod**!
+
 ##### Pattern B: Init Containers ([pod-init.yaml](manifests/pod-init.yaml))
 If an Init Container fails, Kubernetes restarts it until it succeeds (unless `restartPolicy: Never`). If a Pod has multiple `initContainers`, they run **one at a time in order**, and the main app container only starts after every Init Container exits `0`.
 
