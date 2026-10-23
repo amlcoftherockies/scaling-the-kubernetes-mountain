@@ -65,13 +65,46 @@ Verify it: `helm version`
     helm show values podinfo/podinfo | head -n 35
     ```
 
-3.  **Install `podinfo` into your namespace using [helm/podinfo-values.yaml](helm/podinfo-values.yaml):**
+3.  **Download & Poke Around Inside the Chart (`helm pull --untar` & Go Templating):**
+    Ever wonder what is actually inside a Helm chart `.tgz` archive? Use `helm pull --untar` to download and extract `podinfo` into `/tmp/chart-inspect`:
+    ```bash
+    helm pull podinfo/podinfo --untar --untardir /tmp/chart-inspect
+    ls -la /tmp/chart-inspect/podinfo
+    ls -la /tmp/chart-inspect/podinfo/templates
+    ```
+    *Every Helm chart follows this standard anatomy:*
+    *   **`Chart.yaml`**: Chart metadata (`name`, `version` of the chart, `appVersion` of the software).
+    *   **`values.yaml`**: The default configuration dictionary passed into the templates as `.Values`.
+    *   **`templates/*.yaml`**: Kubernetes manifest blueprints written in **Go `text/template` + Sprig functions**.
+    *   **`templates/_helpers.tpl`**: Reusable named template macros (like `podinfo.fullname` or standard labels).
+
+    **Peek inside `templates/deployment.yaml` to see Helm's Go Templating in action:**
+    ```bash
+    head -n 35 /tmp/chart-inspect/podinfo/templates/deployment.yaml
+    ```
+    *Here is how to read the Go template syntax (`{{ ... }}`) you just saw:*
+    | Go Template Syntax | What It Does |
+    | :--- | :--- |
+    | **`{{ .Values.replicaCount }}`** | Reads `replicaCount` from `values.yaml` (or your `-f` / `--set` overrides). |
+    | **`{{ .Release.Name }}` / `{{ .Release.Namespace }}`** | Built-in Helm objects for the release name (`my-podinfo`) and target namespace. |
+    | **`{{- if .Values.ServiceAccount.create }}`** | Conditional block (`{{-` trims leading whitespace/newlines so YAML indentation stays clean). |
+    | **`{{ include "podinfo.fullname" . }}`** | Calls a reusable helper macro defined in `templates/_helpers.tpl`. |
+    | **`{{- toYaml .Values.resources \| nindent 12 }}`** | Converts a nested YAML object into a string and indents it by 12 spaces (`\|` pipes the output just like bash!). |
+
+    **Render the Go Templates Locally Without Installing (`helm template`):**
+    Want to see the exact Kubernetes YAML that Helm will generate *before* sending it to the cluster? Run `helm template`:
+    ```bash
+    helm template my-podinfo /tmp/chart-inspect/podinfo -f helm/podinfo-values.yaml | head -n 45
+    ```
+    *Notice all the `{{ ... }}` placeholders are gone—replaced by your real values from `helm/podinfo-values.yaml` (`replicas: 2`, `name: my-podinfo`, etc.)!*
+
+4.  **Install `podinfo` into your namespace using [helm/podinfo-values.yaml](helm/podinfo-values.yaml):**
     Review [helm/podinfo-values.yaml](helm/podinfo-values.yaml). It sets `replicaCount: 2`, customizes `ui.message` and `ui.color`, and sets `serviceAccount.enabled: false`.
     ```bash
     helm install my-podinfo podinfo/podinfo -f helm/podinfo-values.yaml
     ```
 
-4.  **Verify the Helm release and the Kubernetes resources it created:**
+5.  **Verify the Helm release and the Kubernetes resources it created:**
     ```bash
     helm list
     kubectl get deploy,pods,svc -l app.kubernetes.io/name=my-podinfo
@@ -79,7 +112,7 @@ Verify it: `helm version`
     ```
     *Notice the `sh.helm.release.v1.my-podinfo.v1` Secret—that's where Helm stores Revision 1's state!*
 
-5.  **Upgrade the Release with `--set` (Revision 2) and Expose It on Your Live Domain:**
+6.  **Upgrade the Release with `--set` (Revision 2) and Expose It on Your Live Domain:**
     You can override individual keys on the command line with `--set` (or `--reuse-values` to keep your previous overrides). Let's update `ui.message`, scale to `1` replica, and enable its built-in `Ingress` on your `<namespace>.amlcoftherockies.net` hostname:
     ```bash
     NS=$(kubectl config view --minify -o jsonpath='{..namespace}')
@@ -98,13 +131,13 @@ Verify it: `helm version`
     kubectl rollout status deployment/my-podinfo
     ```
 
-6.  **Test your live Helm-deployed microservice from your laptop (or browser!):**
+7.  **Test your live Helm-deployed microservice from your laptop (or browser!):**
     ```bash
     curl -s http://${MY_HOST}/ | grep -E "hostname|message|version"
     ```
     *You will see `"message": "Upgraded to Revision 2!"` served live from `my-podinfo`!* (You can also open `http://${MY_HOST}` in your web browser to see the `podinfo` UI!).
 
-7.  **Inspect Release History & Roll Back to Revision 1:**
+8.  **Inspect Release History & Roll Back to Revision 1:**
     ```bash
     helm history my-podinfo
     helm rollback my-podinfo 1
@@ -113,6 +146,7 @@ Verify it: `helm version`
     *Notice rolling back to Revision `1` creates **Revision `3`**! Clean up the release when done:*
     ```bash
     helm uninstall my-podinfo
+    rm -rf /tmp/chart-inspect
     ```
 
 ---
