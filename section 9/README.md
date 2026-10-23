@@ -272,6 +272,14 @@ The **Kubernetes Gateway API** (`gateway.networking.k8s.io/v1`) was built to sta
     ```
     *All 4 responses return `Served by Backend v2 (New Release)`!*
 
+    > [!NOTE]
+    > **Why Does `-H "X-Canary: true"` Beat the `75/25` Rule Every Single Time?**
+    > A request to `/` with header `X-Canary: true` actually matches **both** Rule 1 and Rule 2—so how does the Gateway decide which rule wins?
+    > 1. **Gateway API Match Specificity Hierarchy:** The Kubernetes Gateway API specification enforces a strict precedence order when multiple rules match a request:
+    >    * `Exact` path match $>$ longest `PathPrefix` match $>$ **largest number of matching `headers`** $>$ largest number of `queryParams` $>$ first rule in the YAML list.
+    > 2. **Rule 1 Is More Specific Than Rule 2:** When `path` is omitted in Rule 1, Kubernetes defaults it to `PathPrefix: "/"`. That means both rules have the exact same path match (`/`), **but Rule 1 also matches 1 HTTP header (`X-Canary: true`) while Rule 2 matches 0 headers**.
+    > 3. **Single Backend Target:** Because Rule 1 wins on specificity, the Gateway uses Rule 1's `backendRefs`—which points exclusively to `v2-svc` (`100%`), completely bypassing Rule 2's `75/25` weighted split!
+
 5.  **Promote the Canary to 100% (`weight: 0` on `v1`, `weight: 100` on `v2`) Live:**
     Once you are confident in `v2`, shift `100%` of production traffic to `v2-svc` (without restarting a single Pod!) by patching the weights on `app-httproute`:
     ```bash
