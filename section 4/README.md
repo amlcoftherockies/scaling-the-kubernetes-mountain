@@ -206,6 +206,11 @@ kubectl logs pod-init-demo -c seed-html
 ##### Pattern C: The Ambassador Pattern ([pod-ambassador.yaml](manifests/pod-ambassador.yaml))
 In the Ambassador pattern, the main application is hardcoded to talk to `localhost:8080`. It has no idea where the real upstream service lives or how it's configured—an **ambassador proxy container** inside the same Pod listens on `localhost:8080`, injects headers/TLS, and forwards traffic to the upstream backend.
 
+> [!TIP]
+> **Real-World Spotlight: Istio Sidecar-as-Ambassador vs. Istio Ambient Mesh**
+> *   **Classic Istio (Sidecar acting as an Ambassador)**: While Istio is deployed architecturally using the **sidecar pattern**, functionally that `istio-proxy` (Envoy) sidecar acts as an **ambassador**—proxying all outbound (and inbound) network connections on behalf of your application over the Pod's local network stack.
+> *   **Modern Evolution — Istio Ambient Mesh ("Sidecar-less")**: Injecting an Envoy container into every single Pod adds CPU/memory overhead and complicates Pod lifecycle/upgrades. With **Istio Ambient Mesh**, Istio introduced a **sidecar-less data plane**: instead of a proxy container inside every Pod, it uses lightweight, node-level **DaemonSet** zero-trust tunnels (**`ztunnel`**) for L4 mTLS/routing and dedicated per-namespace **waypoint proxies** for L7 traffic—dramatically reducing resource overhead!
+
 Review and apply [pod-ambassador.yaml](manifests/pod-ambassador.yaml):
 ```bash
 kubectl apply -f manifests/pod-ambassador.yaml
