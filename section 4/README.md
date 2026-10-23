@@ -51,6 +51,17 @@ kubectl run nginx-imperative --image=docker.io/library/nginx:1.25-alpine
 kubectl get pods
 ```
 
+> [!NOTE]
+> **Why did `kubectl` print `Warning: would violate PodSecurity "restricted:latest"...`?**
+> When you create a standard `nginx` Pod, you will see:
+> ```text
+> Warning: would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "nginx-custom" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container "nginx-custom" must set securityContext.capabilities.drop=["ALL"]), runAsNonRoot != true (pod or container "nginx-custom" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container "nginx-custom" must set securityContext.seccompProfile.type to "RuntimeDefault" or "Localhost")
+> ```
+> **Your Pod was still created and runs normally!** Here is why you see that message:
+> *   Your workshop namespace is configured with Kubernetes **Pod Security Admission (PSA)** set to **enforce `baseline`** (which blocks truly dangerous settings like `privileged: true` or `hostPath` mounts) while **warning on `restricted`** (`pod-security.kubernetes.io/warn: restricted`).
+> *   Because the default `nginx` image runs as `root` and doesn't drop Linux capabilities or set a `seccompProfile` out of the box, the API server prints a helpful advisory warning showing what would need to be hardened to meet the strict `restricted` profile.
+> *   Deep-dive Pod Security Standards, Linux capabilities, and `seccompProfile` hardening are heavily **CKS (Certified Kubernetes Security Specialist)** topics, but we intentionally enabled the `restricted` warning mode on this cluster to expose you to how production Kubernetes admission controllers guide developers toward secure defaults! (You will also practice silencing every one of these warnings with a hardened `SecurityContext` in **[Section 8](../section%208/README.md)**.)
+
 ##### 💡 CKAD Exam Superpower: Imperative `--dry-run=client -o yaml` to a File
 On the CKAD exam (and in day-to-day workflows), you should almost **never write a YAML manifest from scratch**. Instead, use an imperative `kubectl run` (or `kubectl create`) command with `--dry-run=client -o yaml` and redirect (`>`) the output into a file so you can edit and apply it!
 
